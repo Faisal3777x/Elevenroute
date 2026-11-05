@@ -1,0 +1,20 @@
+{
+  "name": "elevenroute-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ElevenRoute router API: model-agnostic routing, failover and testing for voice and chat agents.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/main.ts",
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "test": "node --test --disable-warning=ExperimentalWarning test/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~6.0.3"
+  }
+}

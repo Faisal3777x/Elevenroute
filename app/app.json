@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "ElevenRoute",
+    "slug": "elevenroute",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/images/icon.png",
+    "scheme": "elevenroute",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#fdfcfc",
+    "ios": {
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.elevenroute.app",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.elevenroute.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#fdfcfc",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "name": "ElevenRoute",
+      "shortName": "ElevenRoute",
+      "backgroundColor": "#fdfcfc",
+      "themeColor": "#fdfcfc",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#fdfcfc",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
