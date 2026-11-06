@@ -7,7 +7,7 @@ import { runTurn } from './chat.ts';
 import { LANGUAGES, TEST_CASES, USE_CASES } from './content.ts';
 import { listAlerts, listResults, listRuns, runTests } from './evaluation.ts';
 import { clearPins, decide } from './router.ts';
-import { overview, whatIf, whatIfBaseline } from './stats.ts';
+import { overview, savings, whatIf, whatIfBaseline } from './stats.ts';
 import { hasKey, resetAll, routingConfig, save, state } from './store.ts';
 import { generateTraffic, trafficStatus } from './traffic.ts';
 
@@ -95,6 +95,7 @@ route('POST', '/route/preview', ({ body }): PreviewResponse => {
 });
 
 route('GET', '/stats/overview', ({ query }) => overview(Math.min(90, Math.max(1, Number(query.get('days')) || 14))));
+route('GET', '/stats/savings', ({ query }) => savings(Math.min(90, Math.max(1, Number(query.get('days')) || 14))));
 route('GET', '/whatif/baseline', () => whatIfBaseline());
 route('POST', '/whatif/simulate', ({ body }) => {
   const volume = body.volume === null || body.volume === undefined ? null : Number(body.volume);

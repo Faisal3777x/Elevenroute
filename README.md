@@ -5,29 +5,29 @@ Model-agnostic routing for voice and chat agents. ElevenRoute sits between custo
 | Part | Stack | Where |
 |---|---|---|
 | Router API | Node.js 24+ and TypeScript, built-in `node:sqlite` and `node:http`, no runtime dependencies | `api/` |
-| App (phone + web dashboard) | Expo SDK 58, React Native 0.88, Expo Router, TypeScript, react-native-svg | `app/` |
-| Shared types | TypeScript types used by both | `shared/types.ts` |
+| Web dashboard | React 19, Vite 8, TypeScript, Tailwind CSS 4, Recharts 3, Motion for React | `web/` |
+| Phone app | Expo SDK 58, React Native 0.88, Expo Router, TypeScript, react-native-svg | `app/` |
+| Shared types | TypeScript types used by all three | `shared/types.ts` |
 
 ## Run it
 
 Needs Node.js 24 or later.
 
 ```bash
-npm run setup      # install api/ and app/ dependencies
-npm run dev        # API on :8000 and the Expo dev server (QR code) together
+npm run setup      # install api/, web/ and app/ dependencies
+npm run dev        # API on :8000 and the web dashboard on :5173
+npm run app        # (second terminal) Expo dev server with the QR code for the phone
 ```
 
-Or in two terminals: `npm run api` and `npm run app`.
-
+- **Web dashboard:** http://localhost:5173
 - **Phone:** install Expo Go, connect the phone to the same Wi-Fi as the computer, and scan the QR code. The app finds the API on your computer automatically (same address as the Expo server, port 8000).
-- **Web dashboard:** press `w` in the Expo terminal, or open http://localhost:8081.
-- **Fill the dashboard:** tap **Generate traffic** on Overview, or run `npm run traffic`.
+- **Fill the dashboard:** click **Generate traffic** on Overview, or run `npm run traffic`.
 
 On Windows, allow Node.js through the firewall on private networks when prompted, or the phone can't reach the computer.
 
 | Command | What it does |
 |---|---|
-| `npm test` | API tests (`node --test`), API type-check, app type-check and lint |
+| `npm test` | API tests (`node --test`), API type-check, web type-check and build, app type-check and lint |
 | `npm run traffic` | send 500 synthetic conversations through the router |
 | `npm run reset` | wipe traffic, tests and edits, then re-seed the demo |
 | `npm run web` | Expo dev server with the web dashboard opened |
@@ -55,16 +55,26 @@ Demo prices, latencies and quality scores are illustrative simulation settings, 
 
 Every decision carries a plain-English reason and a full route trace.
 
-## Screens
+## Web dashboard (`web/`)
 
-| Screen | Phone | Web | Purpose |
-|---|---|---|---|
-| Overview | ✓ | ✓ | requests, cost, cost per conversation, failovers, latency, routing overhead, cost per model over time (chart or table), where turns go, failover history, Demo/Live toggle |
-| Playground | ✓ | ✓ | chat with the router; model, cost, latency, routing time, reason and route trace per reply; outage switches inline |
-| Providers | ✓ | ✓ | Healthy / Down / Slow per vendor, model catalogue: edit, enable, disable, add, delete |
-| Tests | ✓ | ✓ | run the 24-conversation suite (6 call types × English and Spanish × simple and complex), scores against the floor, alerts, heatmap, run history, every scored conversation |
-| Routing rules | | ✓ | live classifier preview, strategy, classifier rules, customer policies, language preferences |
-| What-if | | ✓ | move a share of logged traffic between models and see the monthly cost and quality change |
+| Page | What it shows |
+|---|---|
+| Overview | estimated savings vs a best-model baseline, eight animated KPIs with week-over-week trends and explanations, the **routing visualiser**, cost per model over time (filterable chart or table), where turns go, failover history |
+| Playground | chat with the router; per reply: model, simple/complex badge, cost, latency, routing time, reason, a "Why this model?" trace timeline, failover notifications; the visualiser replays the selected reply |
+| Routing rules | live dry-run preview (score gauge, matched rules, animated candidate ranking, diagram), quality-threshold scale, customer policies with allowed models, strategy, language preferences, classifier rules |
+| Providers | a card per provider with Healthy / Down / Slow switches, breaker and key status, model tiles (pricing, latency, quality, test score vs floor), edit and add dialogs, and a traffic-redirect panel during a simulated outage |
+| Test results | animated run progress, scorecards with change vs the previous run, model comparison chart, heatmap by call type / language / turn type, quality alerts, expandable scored conversations, run history |
+| What-if | traffic-share slider, simulated savings headline, current vs optimised allocation chart, quality / latency / policy trade-offs |
+
+**Routing visualiser.** Replays one real routing trace step by step: request → classification → policy, language and quality checks → each provider attempt (failed attempts turn red and fail over) → selected model → response back to the customer. It only draws what the API returned (`/chat` traces, or `/route/preview` dry runs, which are labelled as such). Play, pause and replay controls; with reduced motion it shows the final route as a static diagram plus a written step list.
+
+**Honesty rules.** Demo mode is flagged on every page. Savings are labelled *Estimate* (Overview) or *Simulated* (What-if). Simulated outages are labelled as test switches.
+
+**Motion.** Shared settings in `web/src/lib/motion.ts` (150–400 ms for interface motion, springs for presses and layout). `MotionConfig reducedMotion="user"` plus a CSS fallback respect `prefers-reduced-motion`. Animations use transform and opacity.
+
+## Phone app (`app/`)
+
+Overview, Playground, Providers and Tests tabs on iOS and Android (Expo Go). Its web build still works, but the dashboard above is the web front end.
 
 ## API
 
@@ -72,8 +82,9 @@ Every decision carries a plain-English reason and a full route trace.
 |---|---|---|
 | POST | `/chat` | `{conversation_id, message, language, use_case, customer_id}` → `{reply, model_used, provider, latency_ms, cost_usd, route_reason, failover_used, turn_type, trace}` |
 | POST | `/route/preview` | routing decision with no model call and no logging |
-| GET | `/stats/overview` | dashboard numbers and time series |
-| GET / POST | `/whatif/baseline`, `/whatif/simulate` | logged cost by model; cost and quality projection |
+| GET | `/stats/overview` | dashboard numbers and time series (incl. `requestsDaily`, `latencyDaily`) |
+| GET | `/stats/savings` | routed spend vs the same logged tokens on each customer's best allowed model (estimate) |
+| GET / POST | `/whatif/baseline`, `/whatif/simulate` | logged cost by model; cost, quality, measured latency and per-model allocation projection |
 | GET, POST, PATCH, DELETE | `/providers`, `/providers/:id` | model catalogue |
 | GET, PUT | `/vendors`, `/vendors/:vendor/state` | vendor status; simulate `healthy`, `down` or `slow` |
 | GET, PUT | `/routing`, `/routing/strategy`, `/routing/rules`, `/routing/policies`, `/routing/languages` | routing configuration |
@@ -99,9 +110,14 @@ api/src/
   traffic.ts       synthetic conversations and incident replay
   store.ts, seed.ts, db.ts   cached config, seed data, SQLite
 api/test/          router, failover and end-to-end API tests
-app/src/app/       screens (Expo Router)
+web/src/
+  App.tsx          shell: sidebar / pill navigation, mode banner and switch, page transitions
+  pages/           the six dashboard pages
+  components/      RoutingVisualiser, TraceTimeline, Kpi, AnimatedNumber, Modal, Tooltip, UI kit
+  lib/             API client, motion settings, formatting, theme, mode context
+app/src/app/       phone screens (Expo Router)
 app/src/components tabs, UI kit, charts, orbs, route trace, outage switches
-shared/types.ts    API types shared by api/ and app/
+shared/types.ts    API types shared by api/, web/ and app/
 ```
 
 ## Limits and next steps

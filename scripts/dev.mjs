@@ -1,9 +1,10 @@
-// Starts the API and the Expo dev server together. Ctrl+C stops both.
+// Starts the API and the web dashboard together. Ctrl+C stops both.
+// For the phone app (QR code), run `npm run app` in a second terminal.
 import { spawn } from 'node:child_process';
 
 const procs = [
   spawn('npm', ['--prefix', 'api', 'run', 'dev'], { stdio: 'inherit', shell: true }),
-  spawn('npm', ['--prefix', 'app', 'start'], { stdio: 'inherit', shell: true }),
+  spawn('npm', ['--prefix', 'web', 'run', 'dev'], { stdio: 'inherit', shell: true }),
 ];
 
 const stop = () => {

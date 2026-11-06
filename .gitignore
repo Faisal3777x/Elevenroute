@@ -4,3 +4,4 @@ node_modules/
 api/data/
 *.log
 .DS_Store
+web/dist/

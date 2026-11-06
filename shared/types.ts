@@ -176,6 +176,10 @@ export interface Overview {
   costByModel: { modelId: string; values: number[] }[];
   share: { modelId: string; simple: number; complex: number }[];
   failoverDaily: number[];
+  /** Turns per day, aligned with `days`. */
+  requestsDaily: number[];
+  /** Average turn latency per day (ms), aligned with `days`; 0 when no turns. */
+  latencyDaily: number[];
   recentFailovers: { ts: number; from: string; to: string | null; reason: string; language: Language }[];
 }
 
@@ -189,6 +193,11 @@ export interface WhatIfRequest {
 }
 
 export interface WhatIfResult {
+  /** Monthly cost per model before and after the move. */
+  allocation: { modelId: string; current: number; projected: number }[];
+  /** Average measured latency (ms) of turns each model served without failover; null if never measured. */
+  latencyFrom: number | null;
+  latencyTo: number | null;
   monthlyConversations: number;
   currentMonthly: number;
   projectedMonthly: number;
@@ -198,6 +207,19 @@ export interface WhatIfResult {
   qualityFrom: number;
   qualityTo: number;
   loggedTurns: number;
+}
+
+/** Routed spend vs the same tokens on each customer's best allowed model. */
+export interface Savings {
+  days: number;
+  turns: number;
+  /** Turns with no eligible baseline model (excluded from both sides). */
+  uncoveredTurns: number;
+  actualCost: number;
+  baselineCost: number;
+  savings: number;
+  savingsPct: number;
+  baselineModels: { modelId: string; turns: number }[];
 }
 
 export interface TestCase {

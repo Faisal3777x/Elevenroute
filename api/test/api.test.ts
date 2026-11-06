@@ -49,6 +49,19 @@ test('outage switch, preview, traffic, stats and what-if work end to end', async
   const sim = await call('POST', '/whatif/simulate', { fromModel: 'claude-sonnet-5-5', toModel: 'gemini-2.5-flash', share: 0.5, turnType: 'all', volume: 100000 });
   assert.equal(sim.status, 200);
   assert.ok(sim.json.projectedMonthly < sim.json.currentMonthly);
+  // The per-model allocation adds up to the totals.
+  const sum = (k: 'current' | 'projected') => sim.json.allocation.reduce((s: number, a: any) => s + a[k], 0);
+  assert.ok(Math.abs(sum('current') - sim.json.currentMonthly) < 1e-6);
+  assert.ok(Math.abs(sum('projected') - sim.json.projectedMonthly) < 1e-6);
+  assert.ok(sim.json.latencyFrom > 0);
+
+  assert.equal(stats.json.requestsDaily.reduce((a: number, b: number) => a + b, 0), stats.json.requests);
+
+  const sav = await call('GET', '/stats/savings');
+  assert.equal(sav.status, 200);
+  assert.ok(sav.json.turns > 0);
+  assert.ok(sav.json.baselineCost >= sav.json.actualCost, 'routing should not cost more than always using the best model');
+  assert.ok(Math.abs(sav.json.savings - (sav.json.baselineCost - sav.json.actualCost)) < 1e-9);
 });
 
 test('config never exposes API keys', async () => {

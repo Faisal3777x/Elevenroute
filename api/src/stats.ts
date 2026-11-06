@@ -1,8 +1,8 @@
-import type { Language, Overview, TurnType, WhatIfRequest, WhatIfResult } from '../../shared/types.ts';
+import type { Language, Overview, Savings, TurnType, WhatIfRequest, WhatIfResult } from '../../shared/types.ts';
 import { db } from './db.ts';
 import { costOf } from './providers.ts';
 import { policyBlock, policyFor } from './router.ts';
-import { effectiveQuality, getModel } from './store.ts';
+import { effectiveQuality, getModel, state } from './store.ts';
 
 const DAY = 86_400_000;
 const dayKey = (ts: number) => {
@@ -30,6 +30,8 @@ export function overview(days = 14): Overview {
   const costByModel = new Map<string, number[]>();
   const share = new Map<string, { simple: number; complex: number }>();
   const failoverDaily = new Array(days).fill(0) as number[];
+  const requestsDaily = new Array(days).fill(0) as number[];
+  const latencySumDaily = new Array(days).fill(0) as number[];
   let totalCost = 0;
   let failovers = 0;
   let latencySum = 0;
@@ -39,6 +41,10 @@ export function overview(days = 14): Overview {
     totalCost += r.cost;
     latencySum += r.latency_ms;
     const di = dayIndex.get(dayKey(r.ts));
+    if (di !== undefined) {
+      requestsDaily[di]++;
+      latencySumDaily[di] += r.latency_ms;
+    }
     if (r.failover) {
       failovers++;
       if (di !== undefined) failoverDaily[di]++;
@@ -70,6 +76,8 @@ export function overview(days = 14): Overview {
     costByModel: [...costByModel].map(([modelId, values]) => ({ modelId, values })),
     share: [...share].map(([modelId, s]) => ({ modelId, ...s })),
     failoverDaily,
+    requestsDaily,
+    latencyDaily: latencySumDaily.map((s, i) => (requestsDaily[i] ? s / requestsDaily[i] : 0)),
     recentFailovers: recent.map((r) => ({ ts: r.ts, from: r.failover_from, to: r.model_id, reason: r.failover_reason, language: r.language })),
   };
 }
@@ -129,33 +137,57 @@ export function whatIf(req: WhatIfRequest): WhatIfResult {
   let movedTurns = 0;
   let qFrom = 0;
   let qTo = 0;
+  const alloc = new Map<string, { current: number; projected: number }>();
+  const add = (id: string, key: 'current' | 'projected', v: number) => {
+    const e = alloc.get(id) ?? { current: 0, projected: 0 };
+    e[key] += v;
+    alloc.set(id, e);
+  };
 
   for (const b of buckets()) {
     const m = getModel(b.model_id);
     if (!m) continue;
     const cost = costOf(m, b.tin, b.tout);
     current += cost;
+    add(m.id, 'current', cost);
     totalTurns += b.n;
     const matches = from && to && b.model_id === from.id && (req.turnType === 'all' || b.turn_type === req.turnType);
     if (!matches) {
       projected += cost;
+      add(m.id, 'projected', cost);
       continue;
     }
     candidateTurns += b.n;
     if (policyBlock(to, policyFor(b.customer_id))) {
       blockedTurns += b.n;
       projected += cost;
+      add(m.id, 'projected', cost);
       continue;
     }
     const moved = b.n * share;
     movedTurns += moved;
-    projected += cost * (1 - share) + costOf(to, b.tin * share, b.tout * share);
+    const movedCost = costOf(to, b.tin * share, b.tout * share);
+    projected += cost * (1 - share) + movedCost;
+    add(m.id, 'projected', cost * (1 - share));
+    add(to.id, 'projected', movedCost);
     const seg = `${b.language}:${b.turn_type}`;
     qFrom += effectiveQuality(from, seg) * moved;
     qTo += effectiveQuality(to, seg) * moved;
   }
 
+  // Measured latency: average of logged turns each model served without a failover.
+  const latencyOf = (id: string | undefined) => {
+    if (!id) return null;
+    const typeFilter = req.turnType === 'all' ? '' : ' AND turn_type = ?';
+    const args: (string | number)[] = req.turnType === 'all' ? [id] : [id, req.turnType];
+    const r = db.prepare(`SELECT AVG(latency_ms) AS v, COUNT(*) AS n FROM turns WHERE model_id = ? AND failover = 0${typeFilter}`).get(...args) as { v: number | null; n: number };
+    return r.n ? r.v : null;
+  };
+
   return {
+    allocation: [...alloc].map(([modelId, v]) => ({ modelId, current: v.current * scale, projected: v.projected * scale })),
+    latencyFrom: latencyOf(from?.id),
+    latencyTo: latencyOf(to?.id),
     monthlyConversations,
     currentMonthly: current * scale,
     projectedMonthly: projected * scale,
@@ -165,5 +197,54 @@ export function whatIf(req: WhatIfRequest): WhatIfResult {
     qualityFrom: movedTurns ? qFrom / movedTurns : from ? effectiveQuality(from) : 0,
     qualityTo: movedTurns ? qTo / movedTurns : to ? effectiveQuality(to) : 0,
     loggedTurns: totalTurns,
+  };
+}
+
+/**
+ * Estimated savings vs a single-model baseline: the same logged tokens priced on the
+ * highest-quality model each customer's policy allows for that language. Both sides use
+ * current catalogue prices, so the comparison is like for like.
+ */
+export function savings(days = 14): Savings {
+  const since = Date.now() - days * DAY;
+  const rows = db
+    .prepare(`SELECT customer_id, model_id, turn_type, language, COUNT(*) AS n, SUM(tokens_in) AS tin, SUM(tokens_out) AS tout
+      FROM turns WHERE model_id IS NOT NULL AND ts >= ? GROUP BY customer_id, model_id, turn_type, language`)
+    .all(since) as unknown as Bucket[];
+
+  const bestFor = (customerId: string, language: Language) => {
+    const policy = policyFor(customerId);
+    return state.models
+      .filter((m) => m.enabled && !m.excluded && m.languages.includes(language) && !policyBlock(m, policy))
+      .sort((a, b) => effectiveQuality(b) - effectiveQuality(a))[0];
+  };
+
+  let actual = 0;
+  let baseline = 0;
+  let turns = 0;
+  let uncovered = 0;
+  const baselineModels = new Map<string, number>();
+  for (const b of rows) {
+    const m = getModel(b.model_id);
+    const best = bestFor(b.customer_id, b.language);
+    if (!m || !best) {
+      uncovered += b.n;
+      continue;
+    }
+    turns += b.n;
+    actual += costOf(m, b.tin, b.tout);
+    baseline += costOf(best, b.tin, b.tout);
+    baselineModels.set(best.id, (baselineModels.get(best.id) ?? 0) + b.n);
+  }
+
+  return {
+    days,
+    turns,
+    uncoveredTurns: uncovered,
+    actualCost: actual,
+    baselineCost: baseline,
+    savings: baseline - actual,
+    savingsPct: baseline > 0 ? ((baseline - actual) / baseline) * 100 : 0,
+    baselineModels: [...baselineModels].map(([modelId, n]) => ({ modelId, turns: n })),
   };
 }
