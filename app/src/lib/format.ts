@@ -27,9 +27,7 @@ export function timeAgo(ts: number): string {
 
 export const LANGS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'es', label: 'Español' },
-  { value: 'ar', label: 'العربية' },
-];
+  { value: 'es', label: 'Español' },];
 
 export const USE_CASES: { value: UseCase; label: string }[] = [
   { value: 'appointment', label: 'Appointment' },

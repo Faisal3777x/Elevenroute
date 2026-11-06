@@ -15,7 +15,7 @@ interface UseCaseContent {
 }
 
 export const USE_CASES: UseCase[] = ['appointment', 'refund', 'order_status', 'insurance', 'complaint', 'faq'];
-export const LANGUAGES: Language[] = ['en', 'es', 'ar'];
+export const LANGUAGES: Language[] = ['en', 'es'];
 
 export const CONTENT: Record<UseCase, UseCaseContent> = {
   appointment: {
@@ -34,12 +34,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         complex: 'Necesito cambiar mi cita porque trabajo hasta tarde entre semana, y mi hija también necesita una revisión. ¿Podemos reservar las dos juntas? ¿Qué doctor está disponible?',
         replySimple: 'Listo, su cita está reservada para mañana a las 3:00 pm. Recibirá un recordatorio una hora antes.',
         replyComplex: 'Puedo ayudarle con ambas. La Dra. Patel tiene dos citas seguidas el jueves desde las 5:30 pm, así que pueden venir juntas. ¿Quiere que las reserve mientras confirma?',
-      },
-      ar: {
-        simple: 'نعم، غداً الساعة الثالثة مناسب.',
-        complex: 'أحتاج إلى تغيير موعدي لأنني أعمل حتى وقت متأخر خلال الأسبوع، وابنتي أيضاً تحتاج إلى فحص. هل يمكننا حجز الموعدين معاً؟ أي طبيب متاح؟',
-        replySimple: 'تم الحجز لك غداً الساعة الثالثة مساءً. ستصلك رسالة تذكير قبل الموعد بساعة.',
-        replyComplex: 'يمكنني المساعدة في الموعدين. لدى الدكتورة باتيل موعدان متتاليان يوم الخميس من الساعة الخامسة والنصف مساءً، لذا يمكنكما الحضور معاً. هل تريد أن أحجزهما لك؟',
       },
     },
   },
@@ -60,12 +54,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         replySimple: 'Gracias, encontré el pedido 48213. ¿Qué desea hacer con él?',
         replyComplex: 'Lamento el cobro doble. Veo ambos pagos en el pedido 48213 y ya abrí el reembolso del duplicado. Volverá a su tarjeta en 3 a 5 días hábiles y recibirá un correo de confirmación.',
       },
-      ar: {
-        simple: 'رقم طلبي هو 48213.',
-        complex: 'تم خصم المبلغ مرتين لنفس الطلب ولم يتم إرجاع الخصم الثاني حتى الآن. أريد استرداد المبلغ المكرر اليوم. من يوافق على ذلك؟',
-        replySimple: 'شكراً، وجدت الطلب 48213. ماذا تريد أن تفعل به؟',
-        replyComplex: 'أعتذر عن الخصم المكرر. أرى الدفعتين على الطلب 48213 وقد فتحت طلب استرداد للمبلغ المكرر. سيعود المبلغ إلى بطاقتك خلال 3 إلى 5 أيام عمل، وستصلك رسالة تأكيد قريباً.',
-      },
     },
   },
   order_status: {
@@ -84,12 +72,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         complex: 'Mi paquete debía llegar el lunes, la página de seguimiento no se actualiza desde hace cuatro días y viajo el viernes. ¿Pueden revisar dónde está? ¿Se puede enviar a mi oficina?',
         replySimple: 'El pedido 55120 está en reparto y debería llegar hoy antes de las 6 pm.',
         replyComplex: 'Su paquete está en nuestro centro regional; una falla del escáner detuvo las actualizaciones. Lo redirigí a su oficina con entrega prioritaria, así que llegará el jueves, antes de su viaje.',
-      },
-      ar: {
-        simple: 'أين الطلب 55120؟',
-        complex: 'كان من المفترض أن يصل طردي يوم الاثنين، وصفحة التتبع لم تتحدث منذ أربعة أيام، وأنا مسافر يوم الجمعة. هل يمكنك التحقق من مكانه؟ هل يمكن تحويله إلى مكتبي؟',
-        replySimple: 'الطلب 55120 خرج للتوصيل ومن المتوقع وصوله قبل الساعة السادسة مساءً اليوم.',
-        replyComplex: 'طردك موجود في مركزنا الإقليمي، وقد أوقف عطل في الماسح تحديثات التتبع. حوّلته إلى عنوان مكتبك مع توصيل ذي أولوية، وسيصل يوم الخميس قبل سفرك.',
       },
     },
   },
@@ -110,12 +92,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         replySimple: 'Listo, su póliza quedó renovada por 12 meses más con la misma prima.',
         replyComplex: 'Puedo actualizar todo a la vez. Con el coche nuevo y la nueva ciudad su prima pasa de 84 a 91 dólares al mes, y añadir a su pareja como conductora suma 12 dólares. ¿Aplico estos cambios con la renovación?',
       },
-      ar: {
-        simple: 'نعم، جدّدها، شكراً.',
-        complex: 'تتجدد وثيقتي الشهر القادم، لكنني اشتريت سيارة جديدة وانتقلت إلى مدينة أخرى. هل سيتغير القسط؟ هل يمكنني إضافة شريكي كسائق ثانٍ في نفس الوقت؟',
-        replySimple: 'تم تجديد وثيقتك لمدة 12 شهراً أخرى بنفس القسط.',
-        replyComplex: 'يمكنني تحديث كل ذلك مرة واحدة. مع السيارة الجديدة والمدينة الجديدة يرتفع القسط من 84 إلى 91 دولاراً شهرياً، وإضافة شريكك كسائق تضيف 12 دولاراً. هل أطبق هذه التغييرات مع التجديد؟',
-      },
     },
   },
   complaint: {
@@ -134,12 +110,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         complex: 'Es la tercera vez que su técnico no llega en el horario acordado y nadie me llamó. Perdí un día de trabajo para nada. Esto es inaceptable y quiero poner una queja formal.',
         replySimple: 'De nada. ¿Hay algo más en lo que pueda ayudarle?',
         replyComplex: 'Lo siento mucho: faltar tres veces sin avisar no es aceptable. Registré una queja formal (referencia C-2291), añadí un crédito de 50 dólares por el día perdido y reservé un horario garantizado de 8 a 10 am con un técnico sénior. Un supervisor le llamará en 24 horas.',
-      },
-      ar: {
-        simple: 'حسناً، شكراً.',
-        complex: 'هذه ثالث مرة يتأخر فيها الفني عن الموعد ولم يتصل بي أحد. أخذت إجازة من العمل بلا فائدة. هذا غير مقبول وأريد تقديم شكوى رسمية.',
-        replySimple: 'على الرحب والسعة. هل هناك شيء آخر يمكنني مساعدتك به؟',
-        replyComplex: 'أعتذر بشدة، فتفويت ثلاث زيارات دون اتصال أمر غير مقبول. سجلت شكوى رسمية (المرجع C-2291)، وأضفت رصيداً بقيمة 50 دولاراً عن يومك الضائع، وحجزت موعداً مضموناً من 8 إلى 10 صباحاً مع فني أول. سيتصل بك مشرف خلال 24 ساعة.',
       },
     },
   },
@@ -160,12 +130,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         replySimple: 'Abrimos de 8 am a 8 pm, de lunes a sábado.',
         replyComplex: 'Premium incluye soporte 24/7; Básico cubre de 9 am a 6 pm entre semana. Ambos incluyen el panel de análisis, pero la exportación de datos es solo de Premium. Con tres sucursales, Premium también le da una vista de administración conjunta.',
       },
-      ar: {
-        simple: 'متى تفتحون؟',
-        complex: 'أقارن بين خطتكم المميزة والأساسية لشركة صغيرة لديها ثلاثة فروع. ما الفرق في ساعات الدعم؟ هل تشمل الخطتان لوحة التحليلات وتصدير البيانات؟',
-        replySimple: 'نفتح من الثامنة صباحاً حتى الثامنة مساءً، من الاثنين إلى السبت.',
-        replyComplex: 'الخطة المميزة تشمل دعماً على مدار الساعة، والأساسية تغطي من 9 صباحاً إلى 6 مساءً في أيام العمل. كلتاهما تشملان لوحة التحليلات، لكن تصدير البيانات متاح في المميزة فقط، كما تمنحك عرضاً إدارياً موحداً لفروعك الثلاثة.',
-      },
     },
   },
 };
@@ -174,22 +138,19 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
 export const FOLLOW_UPS: Record<Language, string[]> = {
   en: ['Yes, that works.', 'Okay, thanks!', "It's 48213.", '3pm is fine.'],
   es: ['Sí, gracias.', 'Vale, perfecto.', 'Es el 48213.', 'Mañana a las 3pm.'],
-  ar: ['نعم، شكراً.', 'تمام.', 'الرقم 48213.', 'غداً الساعة الثالثة.'],
 };
 
 const GENERIC: Record<Language, string> = {
   en: "Great — that's all set. Anything else I can help with?",
   es: 'Perfecto, ya está listo. ¿Algo más en lo que pueda ayudarle?',
-  ar: 'ممتاز، تم كل شيء. هل هناك شيء آخر يمكنني مساعدتك به؟',
 };
 
 export const APOLOGY: Record<Language, string> = {
   en: "Sorry, I'm having trouble right now. Let me connect you to a member of our team.",
   es: 'Lo siento, tengo problemas en este momento. Le paso con una persona de nuestro equipo.',
-  ar: 'عذراً، أواجه مشكلة الآن. سأحولك إلى أحد أعضاء فريقنا.',
 };
 
-export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English', es: 'Spanish', ar: 'Arabic' };
+export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English', es: 'Spanish' };
 
 /** Canned demo reply for a turn. */
 export function cannedReply(message: string, useCase: UseCase, language: Language, turnType: TurnType): string {

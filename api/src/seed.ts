@@ -1,7 +1,7 @@
 import type { ClassifierRule, CustomerPolicy, LanguagePref, ModelInfo, Strategy } from '../../shared/types.ts';
 
 // Demo prices, latencies and quality scores are illustrative simulation settings, not vendor quotes.
-const all = ['en', 'es', 'ar'] as const;
+const all = ['en', 'es'] as const;
 
 export const seedModels: ModelInfo[] = [
   { id: 'gpt-5', name: 'GPT-5', vendor: 'openai', tier: 'flagship', liveModel: 'gpt-5', regions: ['US', 'EU'], languages: [...all], costIn: 0.00125, costOut: 0.01, latencyMs: 1400, errorRate: 0.01, quality: 0.93, enabled: true, testScore: null, excluded: false },
@@ -21,9 +21,7 @@ export const seedPolicies: CustomerPolicy[] = [
 
 export const seedLanguages: LanguagePref[] = [
   { language: 'en', qualityFloor: null, vendorOrder: ['anthropic', 'openai', 'google'] },
-  { language: 'es', qualityFloor: null, vendorOrder: ['openai', 'google', 'anthropic'] },
-  { language: 'ar', qualityFloor: 0.82, vendorOrder: ['anthropic', 'openai', 'google'] },
-];
+  { language: 'es', qualityFloor: null, vendorOrder: ['openai', 'google', 'anthropic'] },];
 
 export const seedStrategy: Strategy = {
   simpleQualityFloor: 0.78,
@@ -52,7 +50,6 @@ export const seedRules: ClassifierRule[] = [
     phrases: [
       'refund', 'chargeback', 'dispute', 'charged twice', 'money back', 'cancel my', 'complaint', 'unacceptable',
       'reembolso', 'devolución', 'devolver', 'cobro', 'disputa', 'queja', 'cancelar',
-      'استرداد', 'استرجاع', 'شكوى', 'إلغاء', 'خصم مرتين',
     ],
   },
   {
@@ -64,7 +61,6 @@ export const seedRules: ClassifierRule[] = [
     phrases: [
       'yes', 'yeah', 'that works', 'sounds good', 'ok', 'okay', 'thanks', 'thank you', 'perfect', 'great',
       'sí', 'si', 'gracias', 'vale', 'de acuerdo', 'perfecto', 'claro',
-      'نعم', 'شكرا', 'شكراً', 'تمام', 'موافق', 'حسنا',
     ],
   },
   { id: 'entity', kind: 'entity', label: 'Order number / booking time', weight: -1, enabled: true },

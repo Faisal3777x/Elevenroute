@@ -36,7 +36,7 @@ const jitter = (base: number, spread = 0.3) => base * (1 - spread + Math.random(
 
 export function estimateTokens(text: string, language: Language): number {
   const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.round(words * (language === 'ar' ? 2.2 : 1.4)));
+  return Math.max(1, Math.round(words * (language === 'es' ? 1.6 : 1.4)));
 }
 
 export function costOf(m: ModelInfo, tokensIn: number, tokensOut: number): number {

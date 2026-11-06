@@ -1,4 +1,4 @@
-import type { Overview, TurnType, WhatIfRequest, WhatIfResult } from '../../shared/types.ts';
+import type { Language, Overview, TurnType, WhatIfRequest, WhatIfResult } from '../../shared/types.ts';
 import { db } from './db.ts';
 import { costOf } from './providers.ts';
 import { policyBlock, policyFor } from './router.ts';
@@ -55,7 +55,7 @@ export function overview(days = 14): Overview {
 
   const recent = db
     .prepare('SELECT ts, failover_from, model_id, failover_reason, language FROM turns WHERE failover = 1 ORDER BY ts DESC LIMIT 25')
-    .all() as { ts: number; failover_from: string; model_id: string | null; failover_reason: string; language: 'en' | 'es' | 'ar' }[];
+    .all() as { ts: number; failover_from: string; model_id: string | null; failover_reason: string; language: Language }[];
 
   return {
     requests: rows.length,
@@ -78,7 +78,7 @@ interface Bucket {
   customer_id: string;
   model_id: string;
   turn_type: TurnType;
-  language: 'en' | 'es' | 'ar';
+  language: Language;
   n: number;
   tin: number;
   tout: number;

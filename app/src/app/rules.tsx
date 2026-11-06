@@ -86,7 +86,7 @@ function Preview({ policies }: { policies: CustomerPolicy[] }) {
   return (
     <Card title="Live classifier preview" right={<Muted>dry run · no model call</Muted>}>
       <View style={{ gap: S.md }}>
-        <Field value={message} onChangeText={setMessage} multiline style={{ minHeight: 70, textAlignVertical: 'top', writingDirection: language === 'ar' ? 'rtl' : 'ltr' }} accessibilityLabel="Message to classify" />
+        <Field value={message} onChangeText={setMessage} multiline style={{ minHeight: 70, textAlignVertical: 'top' }} accessibilityLabel="Message to classify" />
         <Row wrap gap={S.md}>
           <Segmented small value={language} onChange={setLanguage} options={LANGS} />
           <Segmented small value={customer} onChange={setCustomer} options={policies.map((p) => ({ value: p.id, label: p.name }))} />
@@ -159,7 +159,7 @@ function RulesEditor({ initial }: { initial: ClassifierRule[] }) {
             </Row>
             {r.phrases ? (
               <Field
-                label="Phrases (comma-separated; Arabic matches inside words)"
+                label="Phrases (comma-separated)"
                 value={r.phrases.join(', ')}
                 onChangeText={(t) => update(r.id, { phrases: t.split(',').map((p) => p.trim()) })}
                 multiline

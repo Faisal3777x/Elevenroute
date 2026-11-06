@@ -2,7 +2,7 @@
 // Import with `import type` only, so neither runtime ever loads this file.
 
 export type Vendor = 'openai' | 'google' | 'anthropic';
-export type Language = 'en' | 'es' | 'ar';
+export type Language = 'en' | 'es';
 export type UseCase = 'appointment' | 'refund' | 'order_status' | 'insurance' | 'complaint' | 'faq';
 export type TurnType = 'simple' | 'complex';
 export type VendorState = 'healthy' | 'down' | 'slow';

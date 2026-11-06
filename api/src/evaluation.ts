@@ -17,7 +17,7 @@ const noise = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
 
 /** Demo judge: scores come from the model's simulated quality setting plus noise. */
 function simulatedJudge(m: ModelInfo, c: TestCase): Judged {
-  const penalty = (c.turnType === 'complex' ? (m.tier === 'fast' ? 0.07 : 0.02) : 0) + (c.language === 'ar' && m.tier === 'fast' ? 0.03 : 0);
+  const penalty = (c.turnType === 'complex' ? (m.tier === 'fast' ? 0.07 : 0.02) : 0) + (c.language === 'es' && m.tier === 'fast' ? 0.01 : 0);
   const q = m.quality - penalty;
   return {
     reply: '(simulated reply)',

@@ -11,7 +11,7 @@ const { runTests } = await import('../src/evaluation.ts');
 const { TEST_CASES } = await import('../src/content.ts');
 const { state, resetAll } = await import('../src/store.ts');
 
-type Lang = 'en' | 'es' | 'ar';
+type Lang = 'en' | 'es';
 const base = (message: string, language: Lang = 'en', customerId = 'default') => ({
   message, language, useCase: 'faq' as const, customerId, requireKeys: false, breaker: new Breaker(),
 });
@@ -37,9 +37,14 @@ test('confirmations are simple, disputes are complex', () => {
   assert.equal(classify('sí, gracias', 'faq', state.rules, th).turnType, 'simple');
 });
 
-test('Arabic keywords match inside words with attached prefixes', () => {
-  const r = classify('أريد الاسترداد', 'faq', state.rules, state.strategy.complexThreshold);
+test('Spanish dispute keywords are detected', () => {
+  const r = classify('Quiero un reembolso', 'faq', state.rules, state.strategy.complexThreshold);
   assert.ok(r.hits.some((h) => h.id === 'dispute'));
+});
+
+test('only English and Spanish are supported', () => {
+  assert.deepEqual(state.languages.map((l) => l.language), ['en', 'es']);
+  assert.equal(TEST_CASES.length, 24);
 });
 
 test('disabled rules do not fire', () => {
@@ -61,10 +66,10 @@ test('complex turns go to the highest-quality model', () => {
   assert.equal(d.ranked[0].id, 'claude-sonnet-5-5');
 });
 
-test('Arabic raises the simple-turn floor to 0.82', () => {
-  const d = decide(base('نعم، شكراً', 'ar'));
-  assert.equal(d.floor, 0.82);
-  assert.equal(d.ranked[0].id, 'gpt-5-mini');
+test('Spanish simple turns use the global floor and the cheapest model', () => {
+  const d = decide(base('Sí, gracias', 'es'));
+  assert.equal(d.floor, 0.78);
+  assert.equal(d.ranked[0].id, 'gemini-2.5-flash');
 });
 
 test('customer policy filters vendors and regions', () => {

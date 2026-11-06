@@ -57,7 +57,7 @@ export default function TestsScreen() {
   return (
     <Screen
       title="Test results"
-      subtitle="36 conversations · 6 call types × 3 languages × simple and complex. Every model, same tests."
+      subtitle="24 conversations · 6 call types × 2 languages × simple and complex. Every model, same tests."
       onRefresh={results.reload}
       actions={<Pill label="Run tests" icon="check" onPress={run} loading={running} />}>
       {models.error && !models.data ? <ApiErrorNote error={models.error} onRetry={models.reload} /> : null}

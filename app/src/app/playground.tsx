@@ -56,7 +56,6 @@ export default function PlaygroundScreen() {
   };
 
   const suggestions = (cases.data ?? []).filter((c) => c.language === language && c.useCase === useCase);
-  const rtl = language === 'ar';
 
   const settings = (
     <Card>
@@ -96,7 +95,7 @@ export default function PlaygroundScreen() {
       {messages.map((m, i) =>
         m.role === 'user' ? (
           <View key={i} style={styles.userBubble}>
-            <Text style={[styles.userText, m.language === 'ar' && styles.rtl]}>{m.text}</Text>
+            <Text style={styles.userText}>{m.text}</Text>
           </View>
         ) : (
           <AgentReply key={i} res={m.res} language={m.language} models={models.data} />
@@ -146,10 +145,10 @@ export default function PlaygroundScreen() {
               value={input}
               onChangeText={setInput}
               onSubmitEditing={() => send()}
-              placeholder={rtl ? 'اكتب رسالة…' : language === 'es' ? 'Escribe un mensaje…' : 'Type a customer message…'}
+              placeholder={language === 'es' ? 'Escribe un mensaje…' : 'Type a customer message…'}
               placeholderTextColor={C.ink3}
               returnKeyType="send"
-              style={[styles.input, rtl && styles.rtl]}
+              style={styles.input}
               accessibilityLabel="Customer message"
             />
             <Pill label="Send" icon="send" onPress={() => send()} loading={sending} disabled={!input.trim()} />
@@ -171,7 +170,7 @@ function AgentReply({ res, language, models }: { res: ChatResponse; language: La
         {res.failover_used ? <Status kind="slow" label="Failover" /> : null}
         {!res.model_used ? <Status kind="fail" label="All providers failed" /> : null}
       </Row>
-      <Text style={[styles.reply, language === 'ar' && styles.rtl]} selectable>{res.reply}</Text>
+      <Text style={styles.reply} selectable>{res.reply}</Text>
       <Row wrap gap={S.md}>
         <Mono>{money(res.cost_usd)} cost</Mono>
         <Mono>{ms(res.latency_ms)} latency</Mono>
@@ -189,7 +188,6 @@ const styles = StyleSheet.create({
   userText: { fontFamily: F.regular, fontSize: 15, color: C.white, lineHeight: 21 },
   agent: { backgroundColor: C.card, borderRadius: RADIUS, padding: S.lg, gap: S.sm, maxWidth: 720 },
   reply: { fontFamily: F.regular, fontSize: 16, lineHeight: 23, color: C.ink },
-  rtl: { writingDirection: 'rtl', textAlign: 'right' },
   composer: { borderTopWidth: 1, borderColor: C.line, backgroundColor: C.canvas, paddingTop: S.sm },
   input: {
     flex: 1, fontFamily: F.regular, fontSize: 15, color: C.ink, backgroundColor: C.card, borderRadius: 999,

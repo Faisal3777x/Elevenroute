@@ -1,24 +1,18 @@
 import type { Classification, ClassifierRule, RuleHit, UseCase } from '../../shared/types.ts';
 
-const ARABIC = /[؀-ۿ]/;
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/**
- * Latin phrases match on word boundaries. Arabic phrases match inside words,
- * because Arabic attaches prefixes such as "ال" and "و" to the word.
- */
+/** Phrases match on word boundaries. */
 function matches(text: string, phrase: string): boolean {
   const p = phrase.toLowerCase();
-  if (ARABIC.test(p)) return text.includes(p);
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escape(p)}($|[^\\p{L}\\p{N}])`, 'u').test(text);
 }
 
 const ENTITY = [
-  /(^|\D)[0-9٠-٩]{4,}(\D|$)/, // order / booking numbers
+  /(^|\D)\d{4,}(\D|$)/, // order / booking numbers
   /\b\d{1,2}(:\d{2})?\s?(am|pm)\b/i, // 3pm, 10:30 am
   /\b\d{1,2}:\d{2}\b/,
   /\b(tomorrow|today|tonight|monday|tuesday|wednesday|thursday|friday|mañana|hoy|lunes|martes|miércoles|jueves|viernes)\b/i,
-  /(غدا|غداً|اليوم|الساعة)/,
 ];
 
 export function classify(message: string, useCase: UseCase, rules: ClassifierRule[], threshold: number): Classification {
@@ -37,8 +31,8 @@ export function classify(message: string, useCase: UseCase, rules: ClassifierRul
         if (words <= (r.words ?? 6)) hit(r, r.weight, `${r.label} (${words} words)`);
         break;
       case 'multistep': {
-        const sentences = text.split(/[.!?؟]+/).filter((s) => s.trim().length > 0).length;
-        const questions = (text.match(/[?؟]/g) ?? []).length;
+        const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0).length;
+        const questions = (text.match(/\?/g) ?? []).length;
         if (sentences >= 3) hit(r, r.weight, `${sentences} sentences`);
         if (questions >= 2) hit(r, r.weight, `${questions} questions`);
         break;
