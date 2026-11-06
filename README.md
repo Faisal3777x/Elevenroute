@@ -29,6 +29,7 @@ On Windows, allow Node.js through the firewall on private networks when prompted
 |---|---|
 | `npm test` | API tests (`node --test`), API type-check, web type-check and build, app type-check and lint |
 | `npm run traffic` | send 500 synthetic conversations through the router |
+| `npm run traffic:clear` | delete all logged traffic; keep models, rules, policies and test results (same as **Reset traffic** on Overview) |
 | `npm run reset` | wipe traffic, tests and edits, then re-seed the demo |
 | `npm run web` | Expo dev server with the web dashboard opened |
 
@@ -89,7 +90,7 @@ Overview, Playground, Providers and Tests tabs on iOS and Android (Expo Go). Its
 | GET, PUT | `/vendors`, `/vendors/:vendor/state` | vendor status; simulate `healthy`, `down` or `slow` |
 | GET, PUT | `/routing`, `/routing/strategy`, `/routing/rules`, `/routing/policies`, `/routing/languages` | routing configuration |
 | POST, GET | `/tests/run`, `/tests/cases`, `/tests/results`, `/tests/runs`, `/alerts` | test suite |
-| POST, GET | `/traffic/generate`, `/traffic/status` | synthetic traffic |
+| POST, GET | `/traffic/generate`, `/traffic/status`, `/traffic/clear` | synthetic traffic; clear deletes logged turns only |
 | GET, POST | `/config`, `/mode` | mode switch; key presence only |
 | POST | `/reset` | re-seed the demo |
 

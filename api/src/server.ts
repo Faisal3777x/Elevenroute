@@ -9,7 +9,7 @@ import { listAlerts, listResults, listRuns, runTests } from './evaluation.ts';
 import { clearPins, decide } from './router.ts';
 import { overview, savings, whatIf, whatIfBaseline } from './stats.ts';
 import { hasKey, resetAll, routingConfig, save, state } from './store.ts';
-import { generateTraffic, trafficStatus } from './traffic.ts';
+import { clearTraffic, generateTraffic, trafficStatus } from './traffic.ts';
 
 class HttpError extends Error {
   status: number;
@@ -201,6 +201,7 @@ route('GET', '/alerts', () => listAlerts());
 
 route('POST', '/traffic/generate', ({ body }) => generateTraffic(Math.min(2000, Math.max(1, Number(body.count) || 500))));
 route('GET', '/traffic/status', () => trafficStatus());
+route('POST', '/traffic/clear', () => clearTraffic());
 
 route('POST', '/reset', () => {
   resetAll();

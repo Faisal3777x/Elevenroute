@@ -64,6 +64,22 @@ test('outage switch, preview, traffic, stats and what-if work end to end', async
   assert.ok(Math.abs(sav.json.savings - (sav.json.baselineCost - sav.json.actualCost)) < 1e-9);
 });
 
+test('POST /traffic/clear removes logged traffic but keeps settings and test results', async () => {
+  await call('PUT', '/routing/strategy', { latencyBudgetMs: 2500 });
+  await call('POST', '/tests/run');
+  await call('POST', '/traffic/generate', { count: 20 });
+  assert.ok((await call('GET', '/stats/overview')).json.requests > 0);
+
+  const cleared = await call('POST', '/traffic/clear');
+  assert.equal(cleared.status, 200);
+  assert.ok(cleared.json.deletedTurns > 0);
+
+  assert.equal((await call('GET', '/stats/overview')).json.requests, 0);
+  assert.equal((await call('GET', '/traffic/status')).json.turns, 0);
+  assert.equal((await call('GET', '/routing')).json.strategy.latencyBudgetMs, 2500);
+  assert.ok((await call('GET', '/tests/runs')).json.length > 0);
+});
+
 test('config never exposes API keys', async () => {
   process.env.OPENAI_API_KEY = 'sk-secret-test';
   const { json } = await call('GET', '/config');

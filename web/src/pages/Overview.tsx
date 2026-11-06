@@ -1,4 +1,4 @@
-import { ArrowRight, Send, Zap } from 'lucide-react';
+import { ArrowRight, Check, RotateCcw, Send, X, Zap } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
@@ -9,6 +9,7 @@ import { AnimatedNumber } from '../components/AnimatedNumber';
 import { ChartTooltip, SeriesFilter } from '../components/ChartTooltip';
 import { Collapse } from '../components/Collapse';
 import { Kpi } from '../components/Kpi';
+import { Modal } from '../components/Modal';
 import { Orb } from '../components/Orb';
 import { RoutingVisualiser, type RouteRun } from '../components/RoutingVisualiser';
 import { InfoTip } from '../components/Tooltip';
@@ -55,6 +56,31 @@ export default function Overview() {
     }
   };
 
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState<'traffic' | 'all' | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reset = async (scope: 'traffic' | 'all') => {
+    setResetting(scope);
+    setError(null);
+    try {
+      if (scope === 'traffic') {
+        const r = await api.post<{ deletedTurns: number }>('/traffic/clear');
+        setNotice(`Cleared ${count(r.deletedTurns)} logged turns. Settings and test results are unchanged.`);
+      } else {
+        await api.post('/reset');
+        setNotice('Demo reset: traffic, test results and all edits were cleared and the seed data restored.');
+        await models.reload();
+      }
+      setConfirmReset(false);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setResetting(null);
+    }
+  };
+
   const s = stats.data;
   const ms_ = models.data ?? [];
   const costDaily = useMemo(() => (s ? s.days.map((_, i) => s.costByModel.reduce((sum, c) => sum + c.values[i], 0)) : []), [s]);
@@ -65,11 +91,43 @@ export default function Overview() {
         eyebrow={demo ? <SimulatedTag>Demo data · simulated providers</SimulatedTag> : <SimulatedTag>Live data</SimulatedTag>}
         title="Overview"
         subtitle="Where every conversation turn went, what it cost, and how much routing saves compared with always using the best model."
-        actions={<Button icon={Zap} onClick={generate} loading={generating}>Generate traffic</Button>}
+        actions={
+          <>
+            <Button variant="secondary" icon={RotateCcw} onClick={() => setConfirmReset(true)} disabled={generating || !s || s.requests === 0}>Reset traffic</Button>
+            <Button icon={Zap} onClick={() => { setNotice(null); generate(); }} loading={generating} disabled={!!resetting}>Generate traffic</Button>
+          </>
+        }
       />
 
       {stats.error && !s ? <ErrorNote error={stats.error} onRetry={stats.reload} /> : null}
       {error ? <ErrorNote error={error} /> : null}
+      <AnimatePresence>
+        {notice && (
+          <motion.div key="notice" role="status" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={base} className="flex items-center justify-between gap-3 rounded-2xl border border-ok/25 bg-ok/[0.05] px-4 py-3 text-[14px] text-ink">
+            <span className="flex items-center gap-2"><Check size={16} className="text-ok" aria-hidden="true" />{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="rounded-full p-1 text-ink-3 hover:bg-card hover:text-ink"><X size={14} aria-hidden="true" /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <Modal
+        open={confirmReset}
+        onClose={() => !resetting && setConfirmReset(false)}
+        title="Reset traffic?"
+        footer={
+          <>
+            <Button variant="ghost" className="mr-auto" onClick={() => reset('all')} loading={resetting === 'all'} disabled={!!resetting}>Reset whole demo</Button>
+            <Button variant="secondary" onClick={() => setConfirmReset(false)} disabled={!!resetting}>Cancel</Button>
+            <Button icon={RotateCcw} onClick={() => reset('traffic')} loading={resetting === 'traffic'} disabled={!!resetting}>Clear traffic</Button>
+          </>
+        }>
+        <p className="text-[14.5px] leading-relaxed text-ink-2">
+          <strong className="font-medium text-ink">Clear traffic</strong> deletes all {s ? count(s.requests) : ''} logged turns: generated traffic and Playground conversations. The Overview, savings and What-if numbers go back to empty. Models, routing rules, policies and test results are kept.
+        </p>
+        <p className="mt-3 text-[13.5px] leading-relaxed text-ink-3">
+          <strong className="font-medium text-ink-2">Reset whole demo</strong> also deletes test results and undoes every edit to models, rules and policies. This can’t be undone.
+        </p>
+      </Modal>
 
       {!s && !stats.error ? <OverviewSkeleton /> : null}
 
@@ -139,11 +197,11 @@ function SavingsHero({ data, models, demo }: { data: Savings; models: ModelInfo[
             <span className="label">Estimated savings from routing · last {data.days} days</span>
             <SimulatedTag>Estimate</SimulatedTag>
             {demo ? <SimulatedTag>Simulated providers</SimulatedTag> : null}
-            <InfoTip content="We price the same logged tokens on the highest-quality model each customer's policy allows (usually the most expensive) and compare with what routing actually spent. Both use current catalogue prices." />
+            <InfoTip content="We price the same logged tokens on the highest-quality model each customer's policy allows for that language and turn type, and compare with what routing actually spent. Both use current catalogue prices." />
           </div>
           <div className="mt-3 flex items-baseline gap-3">
-            <AnimatedNumber value={data.savingsPct} format={(n) => pct(n, 1)} className="h-display text-[64px] leading-none sm:text-[76px]" />
-            <span className="text-[15px] text-ink-2">lower model spend</span>
+            <AnimatedNumber value={Math.abs(data.savingsPct)} format={(n) => pct(n, 1)} className="h-display text-[64px] leading-none sm:text-[76px]" />
+            <span className="text-[15px] text-ink-2">{data.savings >= 0 ? 'lower model spend' : 'higher spend than the baseline'}</span>
           </div>
           <p className="mt-3 max-w-lg text-[14.5px] leading-relaxed text-ink-2">
             Routing cost <strong className="font-medium text-ink">{money(data.actualCost)}</strong> for {count(data.turns)} turns. Sending every turn to the best allowed model
@@ -157,8 +215,8 @@ function SavingsHero({ data, models, demo }: { data: Savings; models: ModelInfo[
           <CompareBar label="Best-model baseline" value={data.baselineCost} max={max} color="#d4cdc6" />
           <CompareBar label="ElevenRoute routed" value={data.actualCost} max={max} color="#0c0b0a" />
           <div className="flex items-center justify-between rounded-2xl bg-canvas px-4 py-3 ring-1 ring-line">
-            <span className="text-[13px] text-ink-2">Estimated saving</span>
-            <AnimatedNumber value={data.savings} format={money} className="font-mono text-[15px] font-medium text-ok" />
+            <span className="text-[13px] text-ink-2">{data.savings >= 0 ? 'Estimated saving' : 'Estimated extra cost'}</span>
+            <AnimatedNumber value={Math.abs(data.savings)} format={money} className={`font-mono text-[15px] font-medium ${data.savings >= 0 ? 'text-ok' : 'text-warn'}`} />
           </div>
         </div>
       </div>

@@ -212,11 +212,14 @@ export function savings(days = 14): Savings {
       FROM turns WHERE model_id IS NOT NULL AND ts >= ? GROUP BY customer_id, model_id, turn_type, language`)
     .all(since) as unknown as Bucket[];
 
-  const bestFor = (customerId: string, language: Language) => {
+  // "Best" uses the same per-language, per-turn-type quality the router ranks complex turns by,
+  // so the baseline and the routed choice are judged on the same scale.
+  const bestFor = (customerId: string, language: Language, turnType: TurnType) => {
     const policy = policyFor(customerId);
+    const seg = `${language}:${turnType}`;
     return state.models
       .filter((m) => m.enabled && !m.excluded && m.languages.includes(language) && !policyBlock(m, policy))
-      .sort((a, b) => effectiveQuality(b) - effectiveQuality(a))[0];
+      .sort((a, b) => effectiveQuality(b, seg) - effectiveQuality(a, seg))[0];
   };
 
   let actual = 0;
@@ -226,7 +229,7 @@ export function savings(days = 14): Savings {
   const baselineModels = new Map<string, number>();
   for (const b of rows) {
     const m = getModel(b.model_id);
-    const best = bestFor(b.customer_id, b.language);
+    const best = bestFor(b.customer_id, b.language, b.turn_type);
     if (!m || !best) {
       uncovered += b.n;
       continue;

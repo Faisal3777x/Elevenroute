@@ -3,6 +3,7 @@ import { Breaker } from './breaker.ts';
 import { runTurn } from './chat.ts';
 import { CONTENT, FOLLOW_UPS, USE_CASES } from './content.ts';
 import { db } from './db.ts';
+import { clearPins } from './router.ts';
 
 const DAY = 86_400_000;
 const pick = <T>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
@@ -89,6 +90,19 @@ export async function generateTraffic(count = 500): Promise<{ conversations: num
     status.running = false;
   }
   return { conversations: count, turns };
+}
+
+/**
+ * Deletes all logged turns (synthetic and Playground) and forgets sticky conversations.
+ * Models, routing rules, policies and test results are kept.
+ */
+export function clearTraffic(): { deletedTurns: number } {
+  if (status.running) throw new Error('Traffic generation is running; try again when it finishes');
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM turns').get() as { n: number };
+  db.exec('DELETE FROM turns');
+  clearPins();
+  Object.assign(status, { done: 0, total: 0 });
+  return { deletedTurns: n };
 }
 
 export function trafficStatus() {
