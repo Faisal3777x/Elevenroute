@@ -41,19 +41,20 @@ On Windows, allow Node.js through the firewall on private networks when prompted
 
 1. Close the "ElevenRoute API" window or stop `npm run dev`. Sharing runs its own copy of the API on port 8000.
 2. Run `npm run share:public` for teammates anywhere, or `npm run share` for teammates on the same Wi-Fi or office network.
-3. Send them the link and password printed in the window. Their browser asks for a username (anything) and the password.
+3. Send them the links printed in the window: the web dashboard link and, for phones, the Expo Go link (`exp://<your-ip>:8081`, with `npm run app` running in another window). On the same network neither needs a password. The public link asks for a username (anything) and the password.
 
 | | `npm run share` | `npm run share:public` |
 |---|---|---|
-| Who can open it | people on your network | anyone with the link and password |
-| Link | `http://<your-ip>:8000` | `https://<random>.trycloudflare.com` (new each run) |
+| Who can open it | people on your network: web dashboard and Expo Go | also anyone with the public link and password (web dashboard) |
+| Link | `http://<your-ip>:8000`, `exp://<your-ip>:8081` | `https://<random>.trycloudflare.com` (new each run) |
+| Password | none, like `npm run dev` | required on the public link |
 | Needs | Windows firewall allowing Node.js | internet; `cloudflared` (downloaded to `tools/` on first run on Windows) |
 
 - The dashboard is built (`web/dist`) and served by the API itself on one port. It calls the API under `/api/...`.
-- **Password:** set `SHARE_PASSWORD` (8+ characters) in `.env` to keep the same one; otherwise each run prints a new random password. Every request except `/health` needs it (HTTP Basic auth).
+- **Password:** set `SHARE_PASSWORD` (8+ characters) in `.env` to keep the same one; otherwise each run prints a new random password. It's required for requests through the tunnel (except `/health`). Direct connections on your network stay open so Expo Go keeps working; set `REQUIRE_PASSWORD_LOCALLY=1` to guard those too (the phone app then can't connect).
 - **Your computer must stay on**, with the share window open. Closing it stops sharing.
 - **Everyone shares one demo.** Teammates can generate or reset traffic, edit models and rules, and switch to Live mode, which spends API credit if keys are in `.env`.
-- **While sharing**, the phone app and the `npm run dev` dashboard on :5173 can't reach the API (they don't send the password). Stop sharing and run `npm run dev` again to go back.
+- **Expo Go for teammates elsewhere** needs both Metro and the API on public addresses (`npx expo start --tunnel` plus `EXPO_PUBLIC_API_URL`), or a deployed API with an EAS Update. On the same network it works as is.
 - For a permanent link, deploy the API with `SERVE_WEB=1` and `ACCESS_PASSWORD` set to a host such as Render, Railway or Fly.io (needs a persistent disk for `api/data/`), and put single sign-on in front of it before using real keys or data.
 
 ## Modes

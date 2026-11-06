@@ -28,16 +28,31 @@ after(() => {
   rmSync(webDir, { recursive: true, force: true });
 });
 
-test('share mode: the password guards everything except /health', async () => {
-  assert.equal((await fetch(`${base}/health`)).status, 200);
-  const anon = await fetch(`${base}/api/config`);
+const tunnel = { 'cf-connecting-ip': '203.0.113.7' };
+
+test('share mode: the public link (tunnel) needs the password, except /health', async () => {
+  assert.equal((await fetch(`${base}/health`, { headers: tunnel })).status, 200);
+  const anon = await fetch(`${base}/api/config`, { headers: tunnel });
   assert.equal(anon.status, 401);
   assert.match(anon.headers.get('www-authenticate') ?? '', /^Basic/);
-  assert.equal((await fetch(`${base}/`, { headers: { accept: 'text/html' } })).status, 401);
-  assert.equal((await fetch(`${base}/api/config`, { headers: wrong })).status, 401);
-  const ok = await fetch(`${base}/api/config`, { headers: auth });
+  assert.equal((await fetch(`${base}/`, { headers: { ...tunnel, accept: 'text/html' } })).status, 401);
+  assert.equal((await fetch(`${base}/providers`, { headers: { 'x-forwarded-for': '203.0.113.7' } })).status, 401);
+  assert.equal((await fetch(`${base}/api/config`, { headers: { ...tunnel, ...wrong } })).status, 401);
+  const ok = await fetch(`${base}/api/config`, { headers: { ...tunnel, ...auth } });
   assert.equal(ok.status, 200);
   assert.equal(((await ok.json()) as { mode: string }).mode, 'demo');
+});
+
+test('share mode: direct connections on the network (Expo Go, same Wi-Fi) need no password', async () => {
+  assert.equal((await fetch(`${base}/providers`)).status, 200);
+  assert.equal((await fetch(`${base}/`, { headers: { accept: 'text/html' } })).status, 200);
+
+  const strict = createApp({ password: 'team-secret-1', requirePasswordLocally: true });
+  await new Promise<void>((r) => strict.listen(0, '127.0.0.1', r));
+  const strictBase = `http://127.0.0.1:${(strict.address() as AddressInfo).port}`;
+  assert.equal((await fetch(`${strictBase}/providers`)).status, 401);
+  assert.equal((await fetch(`${strictBase}/providers`, { headers: auth })).status, 200);
+  strict.close();
 });
 
 test('share mode: serves the dashboard, its assets and page refreshes; API stays reachable', async () => {

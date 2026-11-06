@@ -279,9 +279,17 @@ async function sendFile(res: ServerResponse, file: string, immutable: boolean) {
   res.end(await readFile(file));
 }
 
+/** Arrived through a tunnel or reverse proxy (Cloudflare adds cf-connecting-ip; others add forwarding headers). */
+const proxied = (req: IncomingMessage) => ['cf-connecting-ip', 'cf-ray', 'x-forwarded-for', 'forwarded'].some((h) => h in req.headers);
+
 export interface AppOptions {
-  /** When set, every request except /health needs this password (HTTP Basic auth, any username). */
+  /**
+   * When set, requests through a tunnel or proxy (the public link) need this password (HTTP Basic auth,
+   * any username), except /health. Direct connections on your network stay open, like `npm run dev`,
+   * so Expo Go and teammates on the same Wi-Fi need no password. Set requirePasswordLocally to guard those too.
+   */
   password?: string;
+  requirePasswordLocally?: boolean;
   /** Folder with the built web dashboard (web/dist). When set, the dashboard is served from this server. */
   webDir?: string;
 }
@@ -295,7 +303,8 @@ export function createApp(options: AppOptions = {}): Server {
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
 
     const url = new URL(req.url ?? '/', 'http://localhost');
-    if (options.password && url.pathname !== '/health' && !authorized(req, options.password)) {
+    const guarded = options.password && url.pathname !== '/health' && (options.requirePasswordLocally || proxied(req));
+    if (guarded && !authorized(req, options.password!)) {
       res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'www-authenticate': 'Basic realm="ElevenRoute", charset="UTF-8"' });
       return void res.end(JSON.stringify({ error: 'password required' }));
     }

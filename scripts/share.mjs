@@ -72,17 +72,25 @@ const lan = Object.values(networkInterfaces())
 let publicUrl = null;
 if (isPublic) publicUrl = await startTunnel();
 
-const line = (label, value) => console.log(`  ${label.padEnd(16)}${value}`);
+const expoUp = await fetch('http://127.0.0.1:8081/status').then((r) => r.ok, () => false);
+const ips = lan.map((u) => new URL(u).hostname);
+
+const line = (label, value) => console.log(`  ${label.padEnd(18)}${value}`);
 console.log('\n========================================================');
-console.log('  ElevenRoute dashboard is shared');
+console.log('  ElevenRoute is shared');
 console.log('========================================================');
-if (publicUrl) line('Public link:', publicUrl);
-for (const u of lan) line('Same network:', u);
-line('This computer:', `http://localhost:${PORT}`);
-line('Password:', `${password}   (username: anything, e.g. "team")`);
+console.log('  Same Wi-Fi / office network (no password):');
+for (const u of lan) line('  Web dashboard:', u);
+for (const ip of ips) line('  Expo Go app:', expoUp ? `exp://${ip}:8081` : '(start it: npm run app, then scan the QR code)');
+if (publicUrl) {
+  console.log('\n  Anywhere (needs the password):');
+  line('  Public link:', publicUrl);
+  line('  Password:', `${password}   (username: anything)`);
+}
 console.log('--------------------------------------------------------');
-if (publicUrl) console.log('  Anyone with the link AND the password can use the dashboard.\n  The link changes each time you run share:public.');
-else console.log('  Same-network links only work for people on your Wi-Fi/office network.\n  For teammates elsewhere, run: npm run share:public');
+console.log('  Expo Go: scan the QR code in the Expo window, or open the exp:// link on the phone.');
+if (!publicUrl) console.log('  For teammates on other networks, run: npm run share:public');
+else console.log('  The public link changes each time you run share:public.');
 console.log('  Keep this window open. Ctrl+C stops sharing.\n');
 
 async function startTunnel() {

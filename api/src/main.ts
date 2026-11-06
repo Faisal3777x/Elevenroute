@@ -20,8 +20,11 @@ if (webDir && !existsSync(resolve(webDir, 'index.html'))) {
   process.exit(1);
 }
 
-createApp({ password, webDir }).listen(port, host, () => {
+const requirePasswordLocally = process.env.REQUIRE_PASSWORD_LOCALLY === '1';
+
+createApp({ password, requirePasswordLocally, webDir }).listen(port, host, () => {
   const where = `http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`;
-  console.log(`ElevenRoute API on ${where} (${state.mode} mode)${password ? ', password required' : ''}`);
+  const guard = password ? (requirePasswordLocally ? ', password required' : ', password required on the public link') : '';
+  console.log(`ElevenRoute API on ${where} (${state.mode} mode)${guard}`);
   if (webDir) console.log(`Web dashboard on ${where}`);
 });
