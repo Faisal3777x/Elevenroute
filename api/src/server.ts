@@ -1,4 +1,7 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { extname, resolve, sep } from 'node:path';
 import type {
   ChatRequest, ClassifierRule, CustomerPolicy, Language, LanguagePref, ModelInfo, PreviewResponse, Strategy, UseCase, Vendor, VendorState, WhatIfRequest,
 } from '../../shared/types.ts';
@@ -231,7 +234,60 @@ function send(res: ServerResponse, status: number, data: unknown) {
   res.end(JSON.stringify(data));
 }
 
-export function createApp(): Server {
+// ---- sharing: password gate and the built web dashboard ----
+const sha = (s: string) => createHash('sha256').update(s).digest();
+
+/** HTTP Basic auth: any username, the shared password. Compared in constant time. */
+function authorized(req: IncomingMessage, password: string): boolean {
+  const m = /^Basic\s+(.+)$/i.exec(req.headers.authorization ?? '');
+  if (!m) return false;
+  const decoded = Buffer.from(m[1], 'base64').toString('utf8');
+  return timingSafeEqual(sha(decoded.slice(decoded.indexOf(':') + 1)), sha(password));
+}
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
+  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
+};
+
+/** A file inside root for this URL path, or null. Never resolves outside root. */
+async function staticFile(root: string, pathname: string): Promise<string | null> {
+  let rel: string;
+  try {
+    rel = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  const file = resolve(root, `.${rel}`);
+  if (!file.startsWith(root + sep)) return null;
+  try {
+    return (await stat(file)).isFile() ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sendFile(res: ServerResponse, file: string, immutable: boolean) {
+  res.writeHead(200, {
+    'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+    'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+  });
+  res.end(await readFile(file));
+}
+
+export interface AppOptions {
+  /** When set, every request except /health needs this password (HTTP Basic auth, any username). */
+  password?: string;
+  /** Folder with the built web dashboard (web/dist). When set, the dashboard is served from this server. */
+  webDir?: string;
+}
+
+export function createApp(options: AppOptions = {}): Server {
+  const webDir = options.webDir ? resolve(options.webDir) : undefined;
   return createServer(async (req, res) => {
     res.setHeader('access-control-allow-origin', '*');
     res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -239,16 +295,31 @@ export function createApp(): Server {
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
 
     const url = new URL(req.url ?? '/', 'http://localhost');
+    if (options.password && url.pathname !== '/health' && !authorized(req, options.password)) {
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'www-authenticate': 'Basic realm="ElevenRoute", charset="UTF-8"' });
+      return void res.end(JSON.stringify({ error: 'password required' }));
+    }
+
+    // The dashboard calls the API under /api/...; the phone app and scripts use the bare paths.
+    let path = url.pathname;
+    if (path === '/api' || path.startsWith('/api/')) path = path.slice(4) || '/';
+    else if (webDir && req.method === 'GET') {
+      const file = await staticFile(webDir, path);
+      if (file) return void (await sendFile(res, file, path.startsWith('/assets/')));
+      // Page loads and refreshes (e.g. /providers) get the app; API clients asking for JSON fall through.
+      if ((req.headers.accept ?? '').includes('text/html')) return void (await sendFile(res, resolve(webDir, 'index.html'), false));
+    }
+
     try {
       for (const r of routes) {
         if (r.method !== req.method) continue;
-        const m = r.pattern.exec(url.pathname);
+        const m = r.pattern.exec(path);
         if (!m) continue;
         const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
         const body = req.method === 'GET' ? {} : await readBody(req);
         return send(res, 200, await r.handler({ body, params, query: url.searchParams }));
       }
-      send(res, 404, { error: `no route for ${req.method} ${url.pathname}` });
+      send(res, 404, { error: `no route for ${req.method} ${path}` });
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
       if (status === 500) console.error(err);

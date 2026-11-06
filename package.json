@@ -12,6 +12,8 @@
     "test": "npm --prefix api test && npm --prefix api run typecheck && npm --prefix web run check && npm --prefix app run check",
     "traffic": "node scripts/call.mjs POST /traffic/generate",
     "traffic:clear": "node scripts/call.mjs POST /traffic/clear",
-    "reset": "node scripts/call.mjs POST /reset"
+    "reset": "node scripts/call.mjs POST /reset",
+    "share": "node scripts/share.mjs",
+    "share:public": "node scripts/share.mjs --public"
   }
 }

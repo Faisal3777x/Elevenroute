@@ -5,3 +5,4 @@ api/data/
 *.log
 .DS_Store
 web/dist/
+tools/

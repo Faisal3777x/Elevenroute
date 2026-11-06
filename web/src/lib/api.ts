@@ -1,5 +1,10 @@
-/** API base: VITE_API_URL, else the same host as the dashboard on port 8000. */
-export const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? `${location.protocol}//${location.hostname || 'localhost'}:8000`;
+/**
+ * API base: VITE_API_URL if set. Otherwise the dev server (npm run dev) talks to the API on port 8000,
+ * and the built dashboard is served by the API itself (npm run share), so it calls /api on the same origin.
+ */
+export const API_BASE =
+  (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ??
+  (import.meta.env.DEV ? `${location.protocol}//${location.hostname || 'localhost'}:8000` : `${location.origin}/api`);
 
 export class ApiError extends Error {}
 

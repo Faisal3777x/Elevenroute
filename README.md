@@ -32,6 +32,29 @@ On Windows, allow Node.js through the firewall on private networks when prompted
 | `npm run traffic:clear` | delete all logged traffic; keep models, rules, policies and test results (same as **Reset traffic** on Overview) |
 | `npm run reset` | wipe traffic, tests and edits, then re-seed the demo |
 | `npm run web` | Expo dev server with the web dashboard opened |
+| `npm run share` | share the dashboard with your team on your network, password protected (see below) |
+| `npm run share:public` | the same, plus a public HTTPS link anyone can open with the password |
+
+## Share with your team
+
+`npm run dev` only works on your own computer. To let teammates open the dashboard:
+
+1. Close the "ElevenRoute API" window or stop `npm run dev`. Sharing runs its own copy of the API on port 8000.
+2. Run `npm run share:public` for teammates anywhere, or `npm run share` for teammates on the same Wi-Fi or office network.
+3. Send them the link and password printed in the window. Their browser asks for a username (anything) and the password.
+
+| | `npm run share` | `npm run share:public` |
+|---|---|---|
+| Who can open it | people on your network | anyone with the link and password |
+| Link | `http://<your-ip>:8000` | `https://<random>.trycloudflare.com` (new each run) |
+| Needs | Windows firewall allowing Node.js | internet; `cloudflared` (downloaded to `tools/` on first run on Windows) |
+
+- The dashboard is built (`web/dist`) and served by the API itself on one port. It calls the API under `/api/...`.
+- **Password:** set `SHARE_PASSWORD` (8+ characters) in `.env` to keep the same one; otherwise each run prints a new random password. Every request except `/health` needs it (HTTP Basic auth).
+- **Your computer must stay on**, with the share window open. Closing it stops sharing.
+- **Everyone shares one demo.** Teammates can generate or reset traffic, edit models and rules, and switch to Live mode, which spends API credit if keys are in `.env`.
+- **While sharing**, the phone app and the `npm run dev` dashboard on :5173 can't reach the API (they don't send the password). Stop sharing and run `npm run dev` again to go back.
+- For a permanent link, deploy the API with `SERVE_WEB=1` and `ACCESS_PASSWORD` set to a host such as Render, Railway or Fly.io (needs a persistent disk for `api/data/`), and put single sign-on in front of it before using real keys or data.
 
 ## Modes
 
@@ -98,8 +121,8 @@ Overview, Playground, Providers and Tests tabs on iOS and Android (Expo Go). Its
 
 ```
 api/src/
-  main.ts          loads .env, starts the server
-  server.ts        routes and validation
+  main.ts          loads .env, starts the server (SERVE_WEB, ACCESS_PASSWORD for sharing)
+  server.ts        routes, validation, password gate, serving the built dashboard
   chat.ts          /chat: decide → call with failover → log → pin the conversation
   router.ts        filtering, ranking, sticky conversations, policy checks
   classifier.ts    simple vs complex (editable rules)
@@ -127,6 +150,6 @@ shared/types.ts    API types shared by api/, web/ and app/
 - **The classifier** is rules-based. A small learned classifier trained on logged turns and judge labels is the next step.
 - **Sticky conversations** that start complex stay on the flagship model for later simple turns. That keeps one voice per call but costs more; consider a "downgrade on simple turns" option if cost matters more.
 - **State** (circuit breaker, sticky pins, cached config) lives in one process. Use Redis or similar for multiple instances.
-- **No login** on the API or the app. Put both behind single sign-on before exposing them.
+- **Login** is one shared password when sharing (`npm run share`), none in development. Use single sign-on for real deployments.
 - **App icon and splash** are still the Expo defaults. Replace the images in `app/assets/images`.
 - **Store builds** need an HTTPS API (`EXPO_PUBLIC_API_URL`). Bundle id and package name are set to `com.elevenroute.app`.
