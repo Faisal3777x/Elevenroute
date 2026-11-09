@@ -58,7 +58,18 @@ On Windows, allow Node.js through the firewall on private networks when prompted
 - **Everyone shares one demo.** With sign-in off, visitors share one workspace: they can generate or reset traffic and edit models and rules. Live mode is locked (`DEMO_ONLY=1`), so nobody can spend the API keys in `.env`.
 - **Expo Go for teammates elsewhere** needs both Metro and the API on public addresses (`npx expo start --tunnel` plus `EXPO_PUBLIC_API_URL`), or a deployed API with an EAS Update. On the same network it works as is.
 - **With Supabase sign-in on**, the share password is not used: every teammate signs in with their own account and gets their own workspace.
-- For a permanent link, deploy the API with `SERVE_WEB=1` and the Supabase settings to a host such as Render, Railway or Fly.io. With Supabase as the database, the host needs no disk.
+- For a permanent, always-on link, deploy to Render (below).
+
+## Hosting on Render (always on)
+
+`render.yaml` is a Render Blueprint for one always-on web service in Frankfurt (next to the Supabase database). It builds the dashboard, starts the API with `SERVE_WEB=1`, runs with `DEMO_ONLY=1` (open access, live mode locked), and checks `/health`.
+
+1. Push this repository to GitHub (a private repository is fine).
+2. In Render: **New → Blueprint**, connect GitHub, pick the repository.
+3. When asked for `DATABASE_URL`, paste the Supabase **Session pooler** connection string. It is stored only in Render. Without it the service refuses to start, rather than losing data on a temporary disk.
+4. Keep the **Starter** plan; the free plan sleeps after 15 minutes without visitors.
+
+To edit afterwards: change the code locally (`npm run dev:local`), commit, and `git push`. Render rebuilds and redeploys in about two minutes. Only run one shared copy against the same database at a time (stop `npm run share:public` once Render is live): each copy caches the workspace settings, so two copies can overwrite each other's edits.
 
 ## Database, sign-in and workspaces
 

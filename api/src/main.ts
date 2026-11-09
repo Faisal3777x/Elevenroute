@@ -6,6 +6,13 @@ for (const file of ['../.env', '.env']) {
   if (existsSync(file)) process.loadEnvFile(file);
 }
 
+// Hosted deployments (render.yaml sets REQUIRE_DATABASE_URL=1) must use Supabase: without it the API would fall back to
+// an embedded database on the host's temporary disk and silently lose every change on each deploy.
+if (process.env.REQUIRE_DATABASE_URL === '1' && !process.env.DATABASE_URL) {
+  console.error('DATABASE_URL is not set. Add the Supabase Session pooler connection string to this service\'s environment.');
+  process.exit(1);
+}
+
 const { createApp } = await import('./server.ts');
 const { backend } = await import('./db.ts');
 const { authEnabled } = await import('./auth.ts');

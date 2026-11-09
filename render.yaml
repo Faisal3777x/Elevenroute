@@ -1,0 +1,33 @@
+# Render Blueprint: one always-on web service that runs the API and serves the built dashboard.
+# Create it in Render: New → Blueprint → pick this repository. Every push to the default branch redeploys.
+services:
+  - type: web
+    name: elevenroute
+    runtime: node
+    # Starter is always on (the free plan sleeps after 15 minutes without visitors).
+    plan: starter
+    # Next to the Supabase database (eu-central-1), so every query is a short hop.
+    region: frankfurt
+    buildCommand: npm ci --prefix api && npm ci --prefix web && npm run build --prefix web
+    startCommand: npm --prefix api start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "26"
+      # Serve web/dist from the API on the one public port.
+      - key: SERVE_WEB
+        value: "1"
+      # Open access without sign-in: everyone shares one workspace, so live mode (real, paid model calls) stays locked.
+      - key: DEMO_ONLY
+        value: "1"
+      # A few connections are plenty for one instance and leave room in the Supabase session pooler.
+      - key: DB_POOL_SIZE
+        value: "5"
+      # Supabase Postgres, Session pooler connection string (Supabase → Connect). Render asks for it when the
+      # Blueprint is created; it is stored only in Render, never in this repository.
+      - key: DATABASE_URL
+        sync: false
+      # Refuse to start without DATABASE_URL instead of falling back to a throwaway on-disk database.
+      - key: REQUIRE_DATABASE_URL
+        value: "1"
