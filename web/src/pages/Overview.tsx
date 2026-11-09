@@ -10,6 +10,7 @@ import { ChartTooltip, SeriesFilter } from '../components/ChartTooltip';
 import { Collapse } from '../components/Collapse';
 import { Kpi } from '../components/Kpi';
 import { Modal } from '../components/Modal';
+import { RouterConstellation } from '../components/Flow';
 import { Orb } from '../components/Orb';
 import { RoutingVisualiser, type RouteRun } from '../components/RoutingVisualiser';
 import { InfoTip } from '../components/Tooltip';
@@ -133,6 +134,7 @@ export default function Overview() {
 
       {s && s.requests === 0 ? (
         <Empty
+          visual={<RouterConstellation />}
           title="No traffic yet"
           body="Generate 500 synthetic conversations across every call type, language and customer, including two replayed provider incidents. Synthetic traffic always uses simulated providers, so it never spends API credit."
           action={<Button icon={Zap} onClick={generate} loading={generating}>Generate traffic</Button>}
@@ -142,6 +144,7 @@ export default function Overview() {
       {s && s.requests > 0 ? (
         <>
           {savings.data && savings.data.turns > 0 ? <SavingsHero data={savings.data} models={ms_} demo={demo} /> : null}
+          {!savings.data ? <Skeleton className="h-[497px] rounded-[var(--radius-card)] sm:h-[457px] lg:h-[361px] xl:h-[300px]" /> : null}
 
           <motion.div variants={fadeUp} className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             <Kpi label="Total requests" value={s.requests} format={count} trend={weekTrend(s.requestsDaily)} goodWhen="neutral" hint={`${count(s.conversations)} conversations · 14 days`} info="Conversation turns routed in the last 14 days. Each customer message is one request." />
@@ -206,6 +209,8 @@ function SavingsHero({ data, models, demo }: { data: Savings; models: ModelInfo[
           <p className="mt-3 max-w-lg text-[14.5px] leading-relaxed text-ink-2">
             Routing cost <strong className="font-medium text-ink">{money(data.actualCost)}</strong> for {count(data.turns)} turns. Sending every turn to the best allowed model
             {top ? <> (mostly {modelName(models, top.modelId)})</> : null} would have cost <strong className="font-medium text-ink">{money(data.baselineCost)}</strong>.
+            {data.unansweredTurns > 0 ? <> {count(data.unansweredTurns)} more {data.unansweredTurns === 1 ? 'turn' : 'turns'} went to a person after every model failed, so {data.unansweredTurns === 1 ? 'it has' : 'they have'} no model cost.</> : null}
+            {data.uncoveredTurns > 0 ? <> {count(data.uncoveredTurns)} {data.uncoveredTurns === 1 ? 'turn is' : 'turns are'} left out because no model is allowed for {data.uncoveredTurns === 1 ? 'its' : 'their'} customer and language any more.</> : null}
           </p>
           <Link to="/whatif" className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-medium text-ink hover:gap-2.5 transition-[gap]">
             Explore scenarios in What-if <ArrowRight size={15} aria-hidden="true" />
@@ -287,10 +292,12 @@ function VisualiserCard({ models, onSent }: { models: ModelInfo[]; onSent: () =>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Sample request">
           {SAMPLES.map((s) => <Chip key={s.id} active={s.id === sample} onClick={() => setSample(s.id)}>{s.label}</Chip>)}
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="label">Customer</span>
-          <Segmented size="sm" label="Customer policy" value={customer} onChange={setCustomer} options={(routing.data?.policies ?? [{ id: 'default', name: 'Default' }]).map((p) => ({ value: p.id, label: p.name }))} />
-        </div>
+        {(routing.data?.policies.length ?? 0) > 1 ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="label">Customer</span>
+            <Segmented size="sm" label="Customer policy" value={customer} onChange={setCustomer} options={(routing.data?.policies ?? []).map((p) => ({ value: p.id, label: p.name }))} />
+          </div>
+        ) : null}
         <Collapse label="Simulate a provider outage to see failover">
           <div className="rounded-2xl bg-canvas p-4 ring-1 ring-line">
             <VendorControls compact />
@@ -406,12 +413,12 @@ function FailoverCard({ data, models }: { data: OverviewData; models: ModelInfo[
   const reduce = useReducedMotion();
   const rows = data.days.map((day, i) => ({ day, failovers: data.failoverDaily[i] }));
   return (
-    <Card title="Failover history" subtitle="Turns where another provider had to answer. Includes the replayed incidents in synthetic traffic.">
+    <Card title="Failover history" subtitle="Turns where a provider failed and another one answered, or a person took over when every model failed. Includes the replayed incidents in synthetic traffic.">
       <div className="h-[120px]" role="img" aria-label="Daily failover counts">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <XAxis dataKey="day" tickFormatter={shortDate} tickLine={false} axisLine={false} tick={{ fontSize: 10.5, fill: INK3 }} minTickGap={22} />
-            <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 10.5, fill: INK3 }} width={28} />
+            <YAxis allowDecimals={false} tickCount={3} domain={[0, (max: number) => Math.max(2, max + (max % 2))]} tickLine={false} axisLine={false} tick={{ fontSize: 10.5, fill: INK3 }} width={28} />
             <Tooltip cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={count} labelFormat={shortDate} />} />
             <Bar dataKey="failovers" name="Failovers" fill="#4a4541" radius={[3, 3, 0, 0]} isAnimationActive={!reduce} />
           </BarChart>

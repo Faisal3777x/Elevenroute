@@ -109,7 +109,11 @@ export async function liveCall(model: ModelInfo, system: string, user: string, t
   const signal = AbortSignal.timeout(timeoutMs);
   const post = async (url: string, headers: Record<string, string>, body: unknown) => {
     const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${model.vendor}`);
+    if (!res.ok) {
+      // Vendors explain failures in the body (e.g. "insufficient_quota"); keep a short, key-free summary.
+      const detail = await res.json().then((j: any) => j?.error?.code ?? j?.error?.type ?? j?.error?.status ?? j?.error?.message, () => null);
+      throw new Error(`HTTP ${res.status} from ${model.vendor}${typeof detail === 'string' && detail ? ` (${detail.slice(0, 80)})` : ''}`);
+    }
     return (await res.json()) as any;
   };
 

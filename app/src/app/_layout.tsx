@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
 import AppTabs from '@/components/app-tabs';
+import { AuthGate } from '@/components/sign-in';
 import { C } from '@/constants/theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -27,7 +28,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={theme}>
       <StatusBar style="dark" />
-      <AppTabs />
+      <AuthGate>
+        <AppTabs />
+      </AuthGate>
     </ThemeProvider>
   );
 }

@@ -16,5 +16,10 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "~6.0.3"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.15",
+    "jose": "^6.2.16",
+    "postgres": "^4.1.0"
   }
 }

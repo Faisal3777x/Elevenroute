@@ -1,6 +1,8 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+import { accessToken, supabase } from './supabase';
+
 /**
  * Finds the API. EXPO_PUBLIC_API_URL wins; otherwise use the same host as the
  * Expo dev server (your computer's LAN address) on port 8000.
@@ -20,17 +22,19 @@ export const API_BASE = resolveBase();
 export class ApiError extends Error {}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const token = await accessToken();
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (token) headers.authorization = `Bearer ${token}`;
   let res: Response;
   try {
-    res = await fetch(API_BASE + path, {
-      method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    res = await fetch(API_BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
     throw new ApiError(`Can't reach the API at ${API_BASE}. Is it running?`);
   }
   const data = await res.json().catch(() => ({}));
+  // Session revoked or expired beyond refresh: sign out so the sign-in screen appears.
+  if (res.status === 401 && supabase && token) void supabase.auth.signOut();
   if (!res.ok) throw new ApiError((data as { error?: string }).error ?? `HTTP ${res.status}`);
   return data as T;
 }

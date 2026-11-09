@@ -3,12 +3,14 @@ import { View } from 'react-native';
 
 import { Legend, SeriesTable, SplitBars, StackedBars } from '@/components/charts';
 import { Orb } from '@/components/orb';
+import { signOut } from '@/components/sign-in';
 import {
   ApiErrorNote, Body, Card, Empty, Grid, Muted, Pill, Row, Screen, Segmented, Stat, StatGrid, Status,
 } from '@/components/ui';
 import { C, F, S, modelColor } from '@/constants/theme';
 import { api } from '@/lib/api';
 import { count, modelName, money, ms, timeAgo } from '@/lib/format';
+import { supabase } from '@/lib/supabase';
 import { useApi } from '@/lib/use-api';
 
 import type { AppConfig, Mode, ModelInfo, Overview } from '../../../shared/types';
@@ -57,7 +59,12 @@ export default function OverviewScreen() {
       subtitle="What every model costs, where turns go, and when providers failed."
       onRefresh={stats.reload}
       refreshing={stats.loading && !!s}
-      actions={<Pill label="Generate traffic" icon="bolt" onPress={generate} loading={generating} />}>
+      actions={
+        <View style={{ flexDirection: 'row', gap: S.sm, flexWrap: 'wrap' }}>
+          <Pill label="Generate traffic" icon="bolt" onPress={generate} loading={generating} />
+          {supabase ? <Pill label="Sign out" variant="secondary" onPress={signOut} /> : null}
+        </View>
+      }>
       {stats.error && !s ? <ApiErrorNote error={stats.error} onRetry={stats.reload} /> : null}
       {genError ? <ApiErrorNote error={genError} /> : null}
 

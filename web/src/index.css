@@ -69,6 +69,39 @@
   .scroll-x { @apply overflow-x-auto overscroll-x-contain; scrollbar-width: thin; }
 }
 
+/* Black theme, used by the landing page only: the same tokens, redefined for a dark canvas.
+   Everything inside .theme-dark that uses bg-canvas, text-ink, border-line… follows automatically. */
+.theme-dark {
+  color-scheme: dark;
+  --color-canvas: #09090a;
+  --color-card: #141315;
+  --color-line: #262428;
+  --color-ink: #f4f1ed;
+  --color-ink-2: #b9b3ad;
+  --color-ink-3: #8a847f;
+  --color-violet: #7c9bff;
+  --color-ember: #ff6a2b;
+  --color-ok: #3fcf8e;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.5), 0 16px 40px -20px rgb(0 0 0 / 0.8);
+  --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.5), 0 24px 48px -20px rgb(0 0 0 / 0.85);
+  --shadow-float: 0 8px 30px -10px rgb(0 0 0 / 0.8);
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+}
+.theme-dark ::selection { background: rgb(124 155 255 / 0.3); }
+.theme-dark .skeleton {
+  background: linear-gradient(90deg, #18171a 25%, #222024 50%, #18171a 75%);
+  background-size: 200% 100%;
+}
+/* While the landing page is open, the page behind it (overscroll, body glows) is black too. */
+html.landing-dark, html.landing-dark body { background-color: #09090a; }
+html.landing-dark body::before { display: none; }
+/* 4K: the landing page is sized in rem, so a larger root size scales the whole page evenly on very wide
+   screens instead of leaving a small column in the middle. Keep in step with scaleFor() in Landing.tsx. */
+@media (min-width: 1920px) { html.landing-dark { font-size: 20px; } }
+@media (min-width: 2560px) { html.landing-dark { font-size: 26px; } }
+@media (min-width: 3400px) { html.landing-dark { font-size: 34px; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;

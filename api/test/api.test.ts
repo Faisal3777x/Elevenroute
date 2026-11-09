@@ -5,14 +5,16 @@ import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 
 const { createApp } = await import('../src/server.ts');
-const { state } = await import('../src/store.ts');
+const { openWorkspace, workspaceIdFor } = await import('../src/store.ts');
+const { LOCAL_USER } = await import('../src/auth.ts');
 
 const server = createApp();
 let base = '';
 
 before(async () => {
-  state.mode = 'demo';
-  for (const m of state.models) m.latencyMs = 20; // keep end-to-end calls quick
+  // Sign-in is off in this suite (no SUPABASE_URL), so every request acts as the local user.
+  const ws = await openWorkspace(await workspaceIdFor(LOCAL_USER));
+  for (const m of ws.models) m.latencyMs = 20; // keep end-to-end calls quick
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });

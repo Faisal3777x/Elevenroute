@@ -99,7 +99,7 @@ export function Segmented<T extends string | number>({ options, value, onChange,
 }) {
   const id = useId();
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex max-w-full flex-wrap rounded-full bg-line/80 p-[3px]">
+    <div role="radiogroup" aria-label={label} className="inline-flex w-fit max-w-full flex-wrap rounded-full bg-line/80 p-[3px]">
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -235,9 +235,10 @@ export function ErrorNote({ error, onRetry }: { error: string; onRetry?: () => v
   );
 }
 
-export function Empty({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
+export function Empty({ title, body, action, visual }: { title: string; body: string; action?: ReactNode; visual?: ReactNode }) {
   return (
     <Card className="flex flex-col items-center gap-2 py-12 text-center">
+      {visual ? <div className="mb-5">{visual}</div> : null}
       <h2 className="h-display text-2xl">{title}</h2>
       <p className="max-w-md text-[14px] leading-relaxed text-ink-3">{body}</p>
       {action ? <div className="mt-3">{action}</div> : null}

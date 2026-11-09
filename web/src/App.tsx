@@ -1,13 +1,19 @@
-import { Calculator, FlaskConical, LayoutDashboard, MessagesSquare, Server, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { Calculator, FlaskConical, LayoutDashboard, LogOut, MessagesSquare, Server, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router';
 
+import type { MeResponse } from '../../shared/types';
 import { Modal } from './components/Modal';
-import { Orb } from './components/Orb';
+import { BrandOrb } from './components/Orb';
 import { Button, Segmented, Skeleton } from './components/ui';
+import { useAuth } from './lib/auth';
 import { ModeProvider, useMode } from './lib/mode';
 import { page, spring } from './lib/motion';
+import { useApi } from './lib/useApi';
+
+const SignIn = lazy(() => import('./pages/SignIn'));
+const Landing = lazy(() => import('./pages/Landing'));
 
 const Overview = lazy(() => import('./pages/Overview'));
 const Playground = lazy(() => import('./pages/Playground'));
@@ -17,7 +23,7 @@ const TestResults = lazy(() => import('./pages/TestResults'));
 const WhatIf = lazy(() => import('./pages/WhatIf'));
 
 const NAV: { to: string; label: string; short: string; icon: LucideIcon }[] = [
-  { to: '/', label: 'Overview', short: 'Overview', icon: LayoutDashboard },
+  { to: '/overview', label: 'Overview', short: 'Overview', icon: LayoutDashboard },
   { to: '/playground', label: 'Playground', short: 'Playground', icon: MessagesSquare },
   { to: '/rules', label: 'Routing rules', short: 'Rules', icon: SlidersHorizontal },
   { to: '/providers', label: 'Providers', short: 'Providers', icon: Server },
@@ -28,10 +34,73 @@ const NAV: { to: string; label: string; short: string; icon: LucideIcon }[] = [
 export function App() {
   return (
     <MotionConfig reducedMotion="user">
-      <ModeProvider>
-        <Shell />
-      </ModeProvider>
+      <Routes>
+        {/* The landing page is public; the dashboard behind it is gated only when sign-in is configured. */}
+        <Route
+          path="/"
+          element={
+            <Suspense fallback={<div className="min-h-dvh" aria-busy="true" />}>
+              <Landing />
+            </Suspense>
+          }
+        />
+        <Route
+          path="*"
+          element={
+            <AuthGate>
+              <ModeProvider>
+                <Shell />
+              </ModeProvider>
+            </AuthGate>
+          }
+        />
+      </Routes>
     </MotionConfig>
+  );
+}
+
+/** With Supabase configured, nothing below renders (and no API call is made) until someone signs in. */
+function AuthGate({ children }: { children: ReactNode }) {
+  const { enabled, ready, session, recovering } = useAuth();
+  if (!enabled) return <>{children}</>;
+  if (!ready) return <div className="min-h-dvh" aria-busy="true" />;
+  if (!session || recovering) {
+    return (
+      <Suspense fallback={<div className="min-h-dvh" aria-busy="true" />}>
+        <SignIn />
+      </Suspense>
+    );
+  }
+  return <>{children}</>;
+}
+
+function Account({ compact = false }: { compact?: boolean }) {
+  const { enabled, user, signOut } = useAuth();
+  const me = useApi<MeResponse>('/me');
+  if (!enabled) {
+    return compact ? null : <p className="px-1 pb-3 text-[12px] leading-relaxed text-ink-3">Open access: no sign-in. Everyone using this server shares one workspace.</p>;
+  }
+  const email = user?.email ?? 'Signed in';
+  if (compact) {
+    return (
+      <button type="button" onClick={signOut} title={`Signed in as ${email}. Sign out`} className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-[13px] font-medium text-white uppercase">
+        {email[0]}
+        <span className="sr-only">Sign out {email}</span>
+      </button>
+    );
+  }
+  return (
+    <div className="mb-3 flex items-center gap-2.5 px-1">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-[13px] font-medium text-white uppercase" aria-hidden="true">{email[0]}</span>
+      <div className="min-w-0 flex-1 leading-tight">
+        <div className="truncate text-[13px] font-medium text-ink" title={email}>{email}</div>
+        <div className="truncate text-[11.5px] text-ink-3">{me.data?.workspace.name ?? 'Your workspace'}</div>
+      </div>
+      <button type="button" onClick={signOut} className="rounded-full p-2 text-ink-3 hover:bg-card hover:text-ink" title="Sign out">
+        <LogOut size={15} aria-hidden="true" />
+        <span className="sr-only">Sign out</span>
+      </button>
+    </div>
   );
 }
 
@@ -40,7 +109,7 @@ function Shell() {
   useEffect(() => {
     window.scrollTo({ top: 0 });
     const current = NAV.find((n) => n.to === location.pathname);
-    document.title = current && current.to !== '/' ? `${current.label} · ElevenRoute` : 'ElevenRoute';
+    document.title = current ? `${current.label} · ElevenRoute` : 'ElevenRoute';
   }, [location.pathname]);
 
   return (
@@ -54,6 +123,7 @@ function Shell() {
           {NAV.map((n) => <SideLink key={n.to} {...n} />)}
         </nav>
         <div className="mt-auto">
+          <Account />
           <ModeSwitch />
         </div>
       </aside>
@@ -61,7 +131,10 @@ function Shell() {
       {/* Mobile / tablet top bar */}
       <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-line bg-canvas/85 px-4 py-3 backdrop-blur lg:hidden">
         <Brand />
-        <ModePill />
+        <div className="flex items-center gap-2">
+          <ModePill />
+          <Account compact />
+        </div>
       </header>
 
       <ModeBanner />
@@ -71,7 +144,7 @@ function Shell() {
           <motion.div key={location.pathname} variants={page} initial="initial" animate="enter" exit="exit">
             <Suspense fallback={<PageSkeleton />}>
               <Routes location={location}>
-                <Route path="/" element={<Overview />} />
+                <Route path="/overview" element={<Overview />} />
                 <Route path="/playground" element={<Playground />} />
                 <Route path="/rules" element={<RoutingRules />} />
                 <Route path="/providers" element={<Providers />} />
@@ -97,7 +170,7 @@ function Shell() {
 function Brand() {
   return (
     <NavLink to="/" className="flex items-center gap-2.5 rounded-xl" aria-label="ElevenRoute home">
-      <Orb model={{ vendor: 'google', tier: 'flagship' }} size={28} />
+      <BrandOrb size={28} live />
       <span className="h-display text-[22px]">ElevenRoute</span>
     </NavLink>
   );
@@ -137,7 +210,15 @@ function ModeBanner() {
   if (error && !config) {
     return <div role="status" className="border-b border-bad/20 bg-bad/[0.05] px-4 py-2 text-center text-[12.5px] text-bad sm:px-6 lg:px-10">{error}</div>;
   }
-  if (!config) return null;
+  if (!config) {
+    return (
+      <div aria-hidden="true" className="invisible flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b border-line px-4 py-2 text-center text-[12.5px] sm:px-6 lg:px-10">
+        <span className="inline-block h-2 w-2" />
+        <strong className="font-medium">Demo mode</strong>
+        <span>Simulated providers. Costs, latencies and scores are simulated, not live measurements.</span>
+      </div>
+    );
+  }
   const demo = config.mode === 'demo';
   return (
     <div role="status" className={`flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b px-4 py-2 text-center text-[12.5px] sm:px-6 lg:px-10 ${demo ? 'border-line bg-card/70 text-ink-2' : 'border-ember/25 bg-ember/[0.06] text-ink'}`}>
@@ -162,6 +243,7 @@ function ModePill() {
 
 function ModeSwitch() {
   const { config, setMode } = useMode();
+  const { enabled } = useAuth();
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   if (!config) return <Skeleton className="h-24" />;
@@ -176,7 +258,15 @@ function ModeSwitch() {
       <div className="label mb-2">Mode</div>
       <Segmented label="Mode" size="sm" value={config.mode} onChange={change} options={[{ value: 'demo', label: 'Demo' }, { value: 'live', label: 'Live' }]} />
       <p className="mt-2 text-[12px] leading-relaxed text-ink-3">
-        {config.mode === 'demo' ? 'Simulated providers, no API keys, no cost.' : keys.length ? `Live keys: ${keys.join(', ')}.` : 'No API keys found in .env.'}
+        {config.mode === 'demo'
+          ? config.liveAllowed === false
+            ? enabled
+              ? 'Simulated providers, no cost. Live mode is limited to admins.'
+              : 'Simulated providers, no cost. Live mode is locked on this shared server.'
+            : 'Simulated providers, no API keys, no cost.'
+          : keys.length
+            ? `Live keys: ${keys.join(', ')}.`
+            : 'No API keys found in .env.'}
       </p>
       <Modal
         open={confirm}
@@ -187,7 +277,7 @@ function ModeSwitch() {
             <Button variant="secondary" onClick={() => setConfirm(false)}>Stay in demo</Button>
             <Button
               loading={busy}
-              disabled={!keys.length}
+              disabled={!keys.length || config.liveAllowed === false}
               onClick={async () => {
                 setBusy(true);
                 await setMode('live').finally(() => setBusy(false));
@@ -201,7 +291,13 @@ function ModeSwitch() {
           Live mode sends Playground and test-suite requests to the real providers and they are billed to your API keys. Synthetic traffic always stays simulated.
         </p>
         <p className="mt-3 text-[14px] text-ink">
-          {keys.length ? `Keys found for: ${keys.join(', ')}. Vendors without a key are skipped.` : 'No API keys were found. Add them to .env and restart the API first.'}
+          {config.liveAllowed === false
+            ? enabled
+              ? 'Your account can’t switch to live mode, because it spends the server’s API keys. An admin can add your email to LIVE_MODE_EMAILS on the API.'
+              : 'This server is shared without sign-in, so live mode is locked: nobody here can spend its API keys.'
+            : keys.length
+              ? `Keys found for: ${keys.join(', ')}. Vendors without a key are skipped.`
+              : 'No API keys were found. Add them to .env and restart the API first.'}
         </p>
       </Modal>
     </div>

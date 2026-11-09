@@ -1,8 +1,9 @@
-import { ArrowRight, KeyRound, Pencil, Plus, Trash } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { KeyRound, Pencil, Plus, Trash } from 'lucide-react';
+import { AnimatePresence, motion, type Variants } from 'motion/react';
 import { useEffect, useState } from 'react';
 
 import type { ModelInfo, PreviewResponse, RoutingConfig, TestCase, Vendor, VendorState } from '../../../shared/types';
+import { FlowArrow } from '../components/Flow';
 import { Modal } from '../components/Modal';
 import { Orb } from '../components/Orb';
 import { Button, Card, ErrorNote, Field, Page, PageHeader, Segmented, SimulatedTag, Skeleton, Status, Toggle, TurnBadge } from '../components/ui';
@@ -18,6 +19,8 @@ const STATES: { value: VendorState; label: string }[] = [
   { value: 'down', label: 'Down' },
   { value: 'slow', label: 'Slow' },
 ];
+
+const collapse: Variants = { hidden: { opacity: 0, height: 0 }, show: { opacity: 1, height: 'auto' } };
 
 const NUMERIC = [
   { key: 'costIn', label: 'Input $ / 1k tokens' },
@@ -60,7 +63,8 @@ export default function Providers() {
 
       <AnimatePresence>
         {affected.length > 0 && (
-          <motion.div key="redirect" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={base} className="overflow-hidden">
+          // Named variants (not inline targets) so "show" reaches the Card inside, which animates by variant.
+          <motion.div key="redirect" variants={collapse} initial="hidden" animate="show" exit="hidden" transition={base} className="overflow-hidden">
             <TrafficRedirect states={Object.fromEntries((vendors.data ?? []).map((v) => [v.vendor, v.state])) as Record<Vendor, VendorState>} models={models.data ?? []} budgetMs={routing.data?.strategy.latencyBudgetMs ?? 2000} />
           </motion.div>
         )}
@@ -77,7 +81,7 @@ export default function Providers() {
               <motion.section key={vendor} variants={fadeUp} className="card overflow-hidden">
                 <div className={`flex flex-wrap items-center justify-between gap-4 border-b px-5 py-4 transition-colors duration-300 sm:px-6 ${v.state === 'down' ? 'border-bad/20 bg-bad/[0.035]' : v.state === 'slow' ? 'border-warn/20 bg-warn/[0.04]' : 'border-line'}`}>
                   <div className="flex flex-wrap items-center gap-3">
-                    <Orb model={{ vendor, tier: 'flagship' }} size={40} />
+                    <Orb model={{ vendor, tier: 'flagship' }} size={40} live={v.state} ping />
                     <div>
                       <h2 className="h-display text-[22px] leading-tight">{VENDOR_NAMES[vendor]}</h2>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -92,7 +96,7 @@ export default function Providers() {
                   <Segmented label={`Simulate state for ${VENDOR_NAMES[vendor]}`} value={v.state} onChange={(s) => vendors.set(vendor, s)} options={STATES} />
                 </div>
                 <div className="grid grid-cols-1 gap-px bg-line md:grid-cols-2">
-                  {list.map((m) => <ModelTile key={m.id} model={m} floor={floor} vendorDown={v.state !== 'healthy'} onToggle={(enabled) => patch(m.id, { enabled })} onEdit={() => setEditing(m)} />)}
+                  {list.map((m) => <ModelTile key={m.id} model={m} floor={floor} vendorState={v.state} onToggle={(enabled) => patch(m.id, { enabled })} onEdit={() => setEditing(m)} />)}
                 </div>
               </motion.section>
             );
@@ -112,12 +116,15 @@ export default function Providers() {
   );
 }
 
-function ModelTile({ model: m, floor, vendorDown, onToggle, onEdit }: { model: ModelInfo; floor: number; vendorDown: boolean; onToggle: (v: boolean) => void; onEdit: () => void }) {
+function ModelTile({ model: m, floor, vendorState, onToggle, onEdit }: { model: ModelInfo; floor: number; vendorState: VendorState; onToggle: (v: boolean) => void; onEdit: () => void }) {
+  const vendorDown = vendorState !== 'healthy';
+  // A model out of routing (disabled or excluded by tests) stops moving, like a down provider.
+  const life: VendorState = !m.enabled || m.excluded ? 'down' : vendorState;
   return (
     <div className="flex flex-col gap-4 bg-card p-5 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Orb model={m} size={34} />
+          <Orb model={m} size={34} live={life} />
           <div className="min-w-0">
             <div className="truncate text-[15.5px] font-medium">{m.name}</div>
             <div className="text-[12.5px] text-ink-3 capitalize">{m.tier} · {m.regions.join(', ')} · {m.languages.map((l) => l.toUpperCase()).join(', ')}</div>
@@ -204,8 +211,8 @@ function TrafficRedirect({ states, models, budgetMs }: { states: Record<Vendor, 
             <AnimatePresence>
               {r.affectedState && (
                 <motion.span initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={base} className="flex items-center gap-1.5 text-[14px]">
-                  <ArrowRight size={15} className="text-ink-3" aria-label="fails over to" />
-                  <Orb model={models.find((m) => m.id === r.to)} size={16} />
+                  <FlowArrow color={modelColor(models.find((m) => m.id === r.to))} label="fails over to" slow={r.affectedState === 'slow'} />
+                  <Orb model={models.find((m) => m.id === r.to)} size={16} live />
                   <span className="font-medium">{name(r.to)}</span>
                 </motion.span>
               )}

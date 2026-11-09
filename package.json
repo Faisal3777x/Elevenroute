@@ -6,6 +6,7 @@
   "scripts": {
     "setup": "npm --prefix api install && npm --prefix web install && npm --prefix app install",
     "dev": "node scripts/dev.mjs",
+    "dev:local": "node scripts/dev.mjs --local",
     "api": "npm --prefix api run dev",
     "web": "npm --prefix web run dev",
     "app": "npm --prefix app start",

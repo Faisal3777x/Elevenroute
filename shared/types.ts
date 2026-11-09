@@ -57,6 +57,8 @@ export interface Strategy {
   complexThreshold: number;
   sticky: boolean;
   upgradeStickyOnComplex: boolean;
+  /** A simple turn in a conversation pinned to a pricier model moves to the cheapest model above the floor. */
+  downgradeStickyOnSimple: boolean;
   breakerFailures: number;
   breakerWindowS: number;
   breakerCooldownS: number;
@@ -204,9 +206,13 @@ export interface WhatIfResult {
   delta: number;
   movedTurnsPct: number;
   blockedPct: number;
-  qualityFrom: number;
-  qualityTo: number;
+  /** Average quality of the moved turns before and after; null when nothing moves. */
+  qualityFrom: number | null;
+  qualityTo: number | null;
   loggedTurns: number;
+  /** The logged sample the monthly projection is scaled from. */
+  loggedConversations: number;
+  windowDays: number;
 }
 
 /** Routed spend vs the same tokens on each customer's best allowed model. */
@@ -215,6 +221,8 @@ export interface Savings {
   turns: number;
   /** Turns with no eligible baseline model (excluded from both sides). */
   uncoveredTurns: number;
+  /** Turns no model answered (handed to a person): no model cost, so not part of the comparison. */
+  unansweredTurns: number;
   actualCost: number;
   baselineCost: number;
   savings: number;
@@ -263,4 +271,15 @@ export interface Alert {
 export interface AppConfig {
   mode: Mode;
   keys: Record<Vendor, boolean>;
+  /** Whether this user may switch to live mode (LIVE_MODE_EMAILS on the API). */
+  liveAllowed?: boolean;
+}
+
+/** GET /me: who is signed in and which workspace their data lives in. */
+export interface MeResponse {
+  user: { id: string; email: string | null };
+  workspace: { id: string; name: string };
+  /** 'off' when the API runs without Supabase (local development). */
+  auth: 'supabase' | 'off';
+  database: 'supabase' | 'local';
 }

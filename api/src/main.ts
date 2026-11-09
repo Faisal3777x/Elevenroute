@@ -7,7 +7,8 @@ for (const file of ['../.env', '.env']) {
 }
 
 const { createApp } = await import('./server.ts');
-const { state } = await import('./store.ts');
+const { backend } = await import('./db.ts');
+const { authEnabled } = await import('./auth.ts');
 
 const port = Number(process.env.PORT) || 8000;
 const host = process.env.HOST ?? '0.0.0.0';
@@ -24,7 +25,9 @@ const requirePasswordLocally = process.env.REQUIRE_PASSWORD_LOCALLY === '1';
 
 createApp({ password, requirePasswordLocally, webDir }).listen(port, host, () => {
   const where = `http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`;
-  const guard = password ? (requirePasswordLocally ? ', password required' : ', password required on the public link') : '';
-  console.log(`ElevenRoute API on ${where} (${state.mode} mode)${guard}`);
+  const guard = password && !authEnabled ? (requirePasswordLocally ? ', password required' : ', password required on the public link') : '';
+  console.log(`ElevenRoute API on ${where}${guard}`);
+  console.log(`  Database: ${backend === 'supabase' ? 'Supabase Postgres (DATABASE_URL)' : 'local embedded Postgres in api/data/pglite'}`);
+  console.log(`  Sign-in: ${authEnabled ? 'Supabase Auth (SUPABASE_URL)' : 'OFF - every request acts as one local user. Set SUPABASE_URL to require sign-in.'}`);
   if (webDir) console.log(`Web dashboard on ${where}`);
 });

@@ -2,7 +2,7 @@ import { RotateCcw, Route, Send, TriangleExclamationPoint, X } from 'lucide-reac
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ChatRequest, ChatResponse, Language, ModelInfo, RoutingConfig, TestCase, UseCase } from '../../../shared/types';
+import type { ChatRequest, ChatResponse, Language, ModelInfo, PreviewResponse, RoutingConfig, TestCase, TurnType, UseCase } from '../../../shared/types';
 import { Collapse } from '../components/Collapse';
 import { Orb } from '../components/Orb';
 import { RoutingVisualiser } from '../components/RoutingVisualiser';
@@ -74,7 +74,20 @@ export default function Playground() {
   const current = agentMsgs.find((m) => m.id === selected) ?? agentMsgs[agentMsgs.length - 1];
   // Memoised so typing doesn't restart the visualiser animation.
   const run = useMemo(() => (current ? runFromChat(current.req, current.res, routing.data?.policies) : null), [current, routing.data]);
-  const suggestions = (cases.data ?? []).filter((c) => c.language === language && c.useCase === useCase);
+  const suggestions = useMemo(() => (cases.data ?? []).filter((c) => c.language === language && c.useCase === useCase), [cases.data, language, useCase]);
+  // Label each suggestion with what the router decides now (current rules and customer), not a fixed tag.
+  const [liveTypes, setLiveTypes] = useState<Record<string, TurnType>>({});
+  useEffect(() => {
+    if (!suggestions.length) return;
+    const c = new AbortController();
+    for (const tc of suggestions) {
+      api
+        .post<PreviewResponse>('/route/preview', { message: tc.message, language: tc.language, use_case: tc.useCase, customer_id: customer }, c.signal)
+        .then((r) => setLiveTypes((t) => ({ ...t, [tc.id]: r.turn_type })))
+        .catch(() => {});
+    }
+    return () => c.abort();
+  }, [suggestions, customer, routing.data]);
   const ms_ = models.data ?? [];
 
   const showInVisualiser = (id: string) => {
@@ -126,7 +139,7 @@ export default function Playground() {
             <div className="scroll-x mb-2.5 flex gap-1.5 pb-0.5">
               {suggestions.map((c) => (
                 <Chip key={c.id} onClick={() => send(c.message)} className="shrink-0">
-                  <TurnBadge turnType={c.turnType} />
+                  <TurnBadge turnType={liveTypes[c.id] ?? c.turnType} />
                   <span className="max-w-[220px] truncate">{c.message}</span>
                 </Chip>
               ))}
@@ -154,10 +167,12 @@ export default function Playground() {
         <div className="flex min-w-0 flex-col gap-5 lg:sticky lg:top-6 lg:self-start">
           <Card title="Request settings">
             <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <span className="label">Customer policy</span>
-                <Segmented size="sm" label="Customer policy" value={customer} onChange={setCustomer} options={(routing.data?.policies ?? [{ id: 'default', name: 'Default' }]).map((p) => ({ value: p.id, label: p.name }))} />
-              </div>
+              {(routing.data?.policies.length ?? 0) > 1 ? (
+                <div className="flex flex-col gap-1.5">
+                  <span className="label">Customer policy</span>
+                  <Segmented size="sm" label="Customer policy" value={customer} onChange={setCustomer} options={(routing.data?.policies ?? []).map((p) => ({ value: p.id, label: p.name }))} />
+                </div>
+              ) : null}
               <div className="flex flex-col gap-1.5">
                 <span className="label">Language</span>
                 <Segmented size="sm" label="Language" value={language} onChange={setLanguage} options={LANGS} />

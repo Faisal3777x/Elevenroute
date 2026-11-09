@@ -1,9 +1,9 @@
 import type { Language, UseCase, Vendor, VendorState } from '../../shared/types.ts';
 import { Breaker } from './breaker.ts';
-import { runTurn } from './chat.ts';
+import { runTurn, TURN_COLUMNS } from './chat.ts';
 import { CONTENT, FOLLOW_UPS, USE_CASES } from './content.ts';
-import { db } from './db.ts';
-import { clearPins } from './router.ts';
+import { db, insertMany } from './db.ts';
+import type { Workspace } from './store.ts';
 
 const DAY = 86_400_000;
 const pick = <T>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
@@ -15,8 +15,6 @@ function weighted<T>(entries: [T, number][]): T {
 
 // Business-hours pattern: weight per hour of day.
 const HOURS: [number, number][] = Array.from({ length: 24 }, (_, h) => [h, h >= 9 && h <= 17 ? 10 : h >= 7 && h <= 20 ? 4 : 0.6]);
-
-export const status = { running: false, done: 0, total: 0 };
 
 interface Incident {
   vendor: Vendor;
@@ -42,12 +40,14 @@ function incidents(now: number): Incident[] {
  * Sends synthetic multi-turn calls through the real router. Always uses the simulated
  * providers on a virtual clock, so it never spends API credit and finishes in about a second.
  */
-export async function generateTraffic(count = 500): Promise<{ conversations: number; turns: number }> {
+export async function generateTraffic(ws: Workspace, count = 500): Promise<{ conversations: number; turns: number }> {
+  const status = ws.traffic;
   if (status.running) throw new Error('Traffic generation is already running');
   Object.assign(status, { running: true, done: 0, total: count });
   const now = Date.now();
   const incs = incidents(now);
-  const breaker = new Breaker();
+  const breaker = new Breaker(() => ws.strategy);
+  const rows: unknown[][] = [];
   const tag = now.toString(36);
 
   const starts = Array.from({ length: count }, () => {
@@ -58,12 +58,11 @@ export async function generateTraffic(count = 500): Promise<{ conversations: num
   }).sort((a, b) => a - b);
 
   let turns = 0;
-  db.exec('BEGIN');
   try {
     for (let i = 0; i < count; i++) {
       const language = weighted<Language>([['en', 6], ['es', 4]]);
       const useCase: UseCase = pick(USE_CASES);
-      const customer = weighted([['default', 4], ['acme', 2], ['globex', 2.5], ['initech', 1.5]]);
+      const customer = 'default';
       const entry = CONTENT[useCase].langs[language];
       const first = Math.random() < 0.5 ? entry.simple : entry.complex;
       const messages = [first];
@@ -75,17 +74,16 @@ export async function generateTraffic(count = 500): Promise<{ conversations: num
         const vendorStates: Record<Vendor, VendorState> = { openai: 'healthy', google: 'healthy', anthropic: 'healthy' };
         for (const inc of incs) if (ts >= inc.start && ts <= inc.end) vendorStates[inc.vendor] = inc.state;
         await runTurn(
+          ws,
           { conversation_id: `syn-${tag}-${i}`, message: messages[k], language, use_case: useCase, customer_id: customer },
-          { simulated: true, virtual: true, breaker, now: ts, vendorStates, synthetic: true },
+          { simulated: true, virtual: true, breaker, now: ts, vendorStates, synthetic: true, log: rows },
         );
         turns++;
       }
       status.done = i + 1;
     }
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
+    // One transaction, a few multi-row statements: fast even against a hosted database.
+    await db.tx((q) => insertMany(q, 'turns', TURN_COLUMNS, rows));
   } finally {
     status.running = false;
   }
@@ -93,19 +91,21 @@ export async function generateTraffic(count = 500): Promise<{ conversations: num
 }
 
 /**
- * Deletes all logged turns (synthetic and Playground) and forgets sticky conversations.
+ * Deletes the workspace's logged turns (synthetic and Playground) and forgets sticky conversations.
  * Models, routing rules, policies and test results are kept.
  */
-export function clearTraffic(): { deletedTurns: number } {
-  if (status.running) throw new Error('Traffic generation is running; try again when it finishes');
-  const { n } = db.prepare('SELECT COUNT(*) AS n FROM turns').get() as { n: number };
-  db.exec('DELETE FROM turns');
-  clearPins();
-  Object.assign(status, { done: 0, total: 0 });
-  return { deletedTurns: n };
+export async function clearTraffic(ws: Workspace): Promise<{ deletedTurns: number }> {
+  if (ws.traffic.running) throw new Error('Traffic generation is running; try again when it finishes');
+  const rows = await db.query('delete from turns where workspace_id = $1 returning 1', [ws.id]);
+  ws.pins.clear();
+  Object.assign(ws.traffic, { done: 0, total: 0 });
+  return { deletedTurns: rows.length };
 }
 
-export function trafficStatus() {
-  const row = db.prepare('SELECT COUNT(*) AS turns, COUNT(DISTINCT conversation_id) AS conversations FROM turns WHERE synthetic = 1').get() as { turns: number; conversations: number };
-  return { ...status, ...row };
+export async function trafficStatus(ws: Workspace) {
+  const row = await db.one<{ turns: number; conversations: number }>(
+    'select count(*)::int as turns, count(distinct conversation_id)::int as conversations from turns where workspace_id = $1 and synthetic',
+    [ws.id],
+  );
+  return { ...ws.traffic, ...row! };
 }

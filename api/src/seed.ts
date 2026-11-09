@@ -14,9 +14,6 @@ export const seedModels: ModelInfo[] = [
 
 export const seedPolicies: CustomerPolicy[] = [
   { id: 'default', name: 'Default', allowedVendors: null, region: null, qualityFloor: null, note: 'No restrictions' },
-  { id: 'acme', name: 'Acme Health', allowedVendors: null, region: 'EU', qualityFloor: null, note: 'EU-hosted models only' },
-  { id: 'globex', name: 'Globex Retail', allowedVendors: null, region: null, qualityFloor: null, note: 'No restrictions' },
-  { id: 'initech', name: 'Initech Insurance', allowedVendors: ['openai', 'anthropic'], region: null, qualityFloor: 0.8, note: 'Contract excludes Google' },
 ];
 
 export const seedLanguages: LanguagePref[] = [
@@ -31,6 +28,8 @@ export const seedStrategy: Strategy = {
   sticky: true,
   // On by default: an escalating call moves up to a stronger model (the spec's production recommendation).
   upgradeStickyOnComplex: true,
+  // On by default: a simple follow-up ("thanks", "yes") doesn't stay on the flagship a complex turn pinned.
+  downgradeStickyOnSimple: true,
   breakerFailures: 2,
   breakerWindowS: 30,
   breakerCooldownS: 20,

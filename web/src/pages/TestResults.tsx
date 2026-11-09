@@ -1,4 +1,4 @@
-import { ChevronDown, FlaskConical, TrendingDown, TrendingUp, TriangleExclamationPoint } from 'lucide-react';
+import { Check, ChevronDown, FlaskConical, RotateCcw, TrendingDown, TrendingUp, TriangleExclamationPoint, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -6,6 +6,7 @@ import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer,
 import type { Alert, ModelInfo, RoutingConfig, TestCase, TestResult, TestRun } from '../../../shared/types';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 import { ChartTooltip } from '../components/ChartTooltip';
+import { Modal } from '../components/Modal';
 import { Orb } from '../components/Orb';
 import { Tooltip as Tip } from '../components/Tooltip';
 import { Button, Card, Chip, Empty, ErrorNote, Page, PageHeader, Segmented, SimulatedTag, Skeleton, Status, TurnBadge } from '../components/ui';
@@ -30,11 +31,31 @@ export default function TestResults() {
   const [running, setRunning] = useState<{ started: number } | null>(null);
   const [done, setDone] = useState<{ id: number; seconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reset = async () => {
+    setResetting(true);
+    setError(null);
+    try {
+      const r = await api.post<{ deletedRuns: number }>('/tests/clear');
+      await Promise.all([models.reload(), results.reload(), runs.reload(), alerts.reload()]);
+      setDone(null);
+      setConfirmReset(false);
+      setNotice(`Cleared ${r.deletedRuns} test ${r.deletedRuns === 1 ? 'run' : 'runs'}. Models are back on their configured quality estimates and none is excluded by a test.`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const run = async () => {
     const started = Date.now();
     setRunning({ started });
     setDone(null);
+    setNotice(null);
     setError(null);
     try {
       const r = await api.post<TestRun>('/tests/run');
@@ -64,9 +85,39 @@ export default function TestResults() {
         title="Test results"
         subtitle={`${caseCount} conversations: 6 call types × English and Spanish × simple and complex. Every model gets the same tests; a model under the floor is removed from routing automatically.`}
         eyebrow={config?.mode === 'live' ? <SimulatedTag>Live judge: strongest model with a key</SimulatedTag> : <SimulatedTag>Demo: simulated judge</SimulatedTag>}
-        actions={<Button icon={FlaskConical} onClick={run} loading={!!running}>Run tests</Button>}
+        actions={
+          <>
+            <Button variant="secondary" icon={RotateCcw} onClick={() => setConfirmReset(true)} disabled={!!running || !runs.data?.length}>Reset tests</Button>
+            <Button icon={FlaskConical} onClick={run} loading={!!running} disabled={resetting}>Run tests</Button>
+          </>
+        }
       />
       {error ? <ErrorNote error={error} /> : null}
+      <AnimatePresence>
+        {notice && (
+          <motion.div key="notice" role="status" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={base} className="flex items-center justify-between gap-3 rounded-2xl border border-ok/25 bg-ok/[0.05] px-4 py-3 text-[14px] text-ink">
+            <span className="flex items-center gap-2"><Check size={16} className="text-ok" aria-hidden="true" />{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="rounded-full p-1 text-ink-3 hover:bg-card hover:text-ink"><X size={14} aria-hidden="true" /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <Modal
+        open={confirmReset}
+        onClose={() => !resetting && setConfirmReset(false)}
+        title="Reset test results?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmReset(false)} disabled={resetting}>Cancel</Button>
+            <Button icon={RotateCcw} onClick={reset} loading={resetting}>Reset tests</Button>
+          </>
+        }>
+        <p className="text-[14.5px] leading-relaxed text-ink-2">
+          Deletes all {runs.data?.length ?? ''} test {runs.data?.length === 1 ? 'run' : 'runs'}, every scored conversation and the quality alerts. Routing goes back to each model’s configured quality estimate, and any model a test excluded is allowed again.
+        </p>
+        <p className="mt-3 text-[13.5px] leading-relaxed text-ink-3">
+          Logged traffic, routing rules, policies and model settings are kept. Run the tests again at any time. This can’t be undone.
+        </p>
+      </Modal>
       <AnimatePresence>{running || done ? <RunProgress key="progress" running={running} done={done} models={modelCount} cases={caseCount} /> : null}</AnimatePresence>
 
       {!models.data || !results.data ? <Skeleton className="h-72" /> : null}
@@ -182,12 +233,12 @@ function Comparison({ models, perModel, floor }: { models: ModelInfo[]; perModel
       right={<Segmented size="sm" label="Metric" value={metric} onChange={setMetric} options={[{ value: 'score', label: 'Score' }, { value: 'completion', label: 'Completion' }, { value: 'accuracy', label: 'Accuracy' }, { value: 'tone', label: 'Tone' }, { value: 'latency', label: 'Latency' }]} />}>
       <div className="h-[260px]" role="img" aria-label={data.map((d) => `${d.name}: ${fmt(d.value)}`).join('; ')}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 12, right: metric === 'score' ? 96 : 8, left: 0, bottom: 0 }}>
+          <BarChart data={data} margin={{ top: 12, right: metric === 'score' ? 118 : 8, left: 0, bottom: 0 }}>
             <CartesianGrid vertical={false} stroke={LINE} />
             <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} interval={0} />
             <YAxis tickFormatter={(v: number) => (metric === 'latency' ? `${Math.round(v)}` : metric === 'completion' ? `${v}%` : String(v))} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} width={44} domain={metric === 'score' ? [0, 1] : metric === 'completion' ? [0, 100] : metric === 'latency' ? [0, 'auto'] : [0, 5]} />
             <Tooltip cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={fmt} />} />
-            {metric === 'score' ? <ReferenceLine y={floor} stroke="#c0262d" strokeDasharray="4 4" label={{ value: `exclusion floor ${floor}`, position: 'right', fontSize: 11, fill: '#c0262d' }} /> : null}
+            {metric === 'score' ? <ReferenceLine y={floor} stroke="#c0262d" strokeDasharray="4 4" label={{ value: `exclusion floor ${floor.toFixed(2)}`, position: 'right', fontSize: 11, fill: '#c0262d' }} /> : null}
             <Bar dataKey="value" name={metric[0].toUpperCase() + metric.slice(1)} radius={[6, 6, 0, 0]} isAnimationActive={!reduce} animationDuration={600}>
               {data.map((d) => <Cell key={d.name} fill={d.color} />)}
             </Bar>

@@ -1,11 +1,11 @@
-import { Check, Filter, ListOrdered, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Check, Filter, ListOrdered, ShieldCheck, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 
 import type { ModelInfo, RouteTrace } from '../../../shared/types';
 import { money, ms } from '../lib/format';
 import { fadeUp, stagger } from '../lib/motion';
-import { Orb } from './Orb';
+import { BrandOrb, Orb } from './Orb';
 import { TurnBadge } from './ui';
 
 /** Polished route-trace timeline: classifier → checks → ranking → attempts. */
@@ -17,7 +17,7 @@ export function TraceTimeline({ trace, models }: { trace: RouteTrace; models: Mo
 
   return (
     <motion.ol variants={stagger} initial="hidden" animate="show" className="relative ml-2 border-l border-line pl-5">
-      <Item icon={<Sparkles size={13} />} title={<>Classified <TurnBadge turnType={c.turnType} score={c.score} /></>}>
+      <Item icon={<BrandOrb size={20} />} plain title={<>ElevenRoute classified it <TurnBadge turnType={c.turnType} score={c.score} /></>}>
         {c.hits.length ? (
           <div className="flex flex-wrap gap-1.5">
             {c.hits.map((h, i) => (
@@ -58,8 +58,9 @@ export function TraceTimeline({ trace, models }: { trace: RouteTrace; models: Mo
   );
 }
 
-function Item({ icon, title, children, tone }: { icon: ReactNode; title: ReactNode; children?: ReactNode; tone?: 'ok' | 'bad' }) {
-  const dot = tone === 'bad' ? 'bg-bad text-white' : tone === 'ok' ? 'bg-ok text-white' : 'bg-canvas text-ink-2 ring-1 ring-line';
+function Item({ icon, title, children, tone, plain }: { icon: ReactNode; title: ReactNode; children?: ReactNode; tone?: 'ok' | 'bad'; plain?: boolean }) {
+  // plain: the icon brings its own shape (the ElevenRoute logo), so no dot background.
+  const dot = plain ? '' : tone === 'bad' ? 'bg-bad text-white' : tone === 'ok' ? 'bg-ok text-white' : 'bg-canvas text-ink-2 ring-1 ring-line';
   return (
     <motion.li variants={fadeUp} className="relative mb-3.5">
       <span className={`absolute -left-[31px] top-0 flex h-5 w-5 items-center justify-center rounded-full ${dot}`} aria-hidden="true">{icon}</span>

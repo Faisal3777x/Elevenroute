@@ -1,10 +1,11 @@
 // Shares the web dashboard with your team.
-//   npm run share          -> one server on :8000 (dashboard + API), reachable on your network, password protected
+//   npm run share          -> one server on :8000 (dashboard + API), reachable on your network
 //   npm run share:public   -> the same, plus a public HTTPS link through a free Cloudflare quick tunnel
-// The password is SHARE_PASSWORD from the environment or .env, else a new random one each run.
-// (It reaches the API as ACCESS_PASSWORD; plain `npm run dev` stays password-free.) Ctrl+C stops everything.
+// Open to everyone by default. Set SHARE_PASSWORD (env or .env, 8+ characters) to put a password on the
+// public link; it reaches the API as ACCESS_PASSWORD and only applies while sign-in is off.
+// With sign-in off, every visitor shares one workspace, so the API runs with DEMO_ONLY=1 (live mode locked).
+// Ctrl+C stops everything.
 import { spawn, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { networkInterfaces } from 'node:os';
@@ -15,8 +16,10 @@ if (existsSync(join(root, '.env'))) process.loadEnvFile(join(root, '.env'));
 
 const PORT = Number(process.env.PORT) || 8000;
 const isPublic = process.argv.includes('--public');
-const password = process.env.SHARE_PASSWORD || randomBytes(9).toString('base64url');
-if (password.length < 8) fail('SHARE_PASSWORD must be at least 8 characters.');
+const password = process.env.SHARE_PASSWORD || '';
+if (password && password.length < 8) fail('SHARE_PASSWORD must be at least 8 characters.');
+const signIn = Boolean(process.env.SUPABASE_URL);
+const gated = Boolean(password) && !signIn;
 
 function fail(message) {
   console.error(`\n${message}\n`);
@@ -50,7 +53,7 @@ const api = spawn('npm', ['--prefix', 'api', 'start'], {
   cwd: root,
   stdio: 'inherit',
   shell: true,
-  env: { ...process.env, PORT: String(PORT), SERVE_WEB: '1', ACCESS_PASSWORD: password },
+  env: { ...process.env, PORT: String(PORT), SERVE_WEB: '1', ACCESS_PASSWORD: password, ...(signIn ? {} : { DEMO_ONLY: '1' }) },
 });
 procs.push(api);
 api.on('exit', (code) => code && fail('The API stopped (see above).'));
@@ -79,15 +82,16 @@ const line = (label, value) => console.log(`  ${label.padEnd(18)}${value}`);
 console.log('\n========================================================');
 console.log('  ElevenRoute is shared');
 console.log('========================================================');
-console.log('  Same Wi-Fi / office network (no password):');
+console.log('  Same Wi-Fi / office network:');
 for (const u of lan) line('  Web dashboard:', u);
 for (const ip of ips) line('  Expo Go app:', expoUp ? `exp://${ip}:8081` : '(start it: npm run app, then scan the QR code)');
 if (publicUrl) {
-  console.log('\n  Anywhere (needs the password):');
+  console.log(gated ? '\n  Anywhere (needs the password):' : '\n  Anywhere:');
   line('  Public link:', publicUrl);
-  line('  Password:', `${password}   (username: anything)`);
+  if (gated) line('  Password:', `${password}   (username: anything)`);
 }
 console.log('--------------------------------------------------------');
+console.log(signIn ? '  Sign-in: on (each person has their own workspace).' : '  Open access: no sign-in, everyone shares one workspace. Live mode is locked (demo only).');
 console.log('  Expo Go: scan the QR code in the Expo window, or open the exp:// link on the phone.');
 if (!publicUrl) console.log('  For teammates on other networks, run: npm run share:public');
 else console.log('  The public link changes each time you run share:public.');

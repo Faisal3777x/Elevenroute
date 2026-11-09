@@ -24,8 +24,13 @@ const VOLUMES = [
 
 export default function WhatIf() {
   const models = useApi<ModelInfo[]>('/providers');
-  const [from, setFrom] = useState('claude-sonnet-5-5');
-  const [to, setTo] = useState('gemini-2.5-flash');
+  const baseline = useApi<{ models: { modelId: string; turns: number; monthlyCost: number }[] }>('/whatif/baseline');
+  const [from, setFromRaw] = useState('claude-sonnet-5-5');
+  const [to, setToRaw] = useState('gemini-2.5-flash');
+  const [picked, setPicked] = useState(false);
+  // Picking the other side's model swaps them, so a move is always between two different models.
+  const setFrom = (id: string) => { setPicked(true); if (id === to) setToRaw(from); setFromRaw(id); };
+  const setTo = (id: string) => { setPicked(true); if (id === from) setFromRaw(to); setToRaw(id); };
   const [share, setShare] = useState(50);
   const [turnType, setTurnType] = useState<TurnType | 'all'>('simple');
   const [volume, setVolume] = useState(0);
@@ -44,7 +49,19 @@ export default function WhatIf() {
   }, [from, to, share, turnType, volume]);
 
   const list = useMemo(() => sortModels(models.data ?? []), [models.data]);
+
+  // Until the visitor picks, start from the model with the most logged spend, moving it to the cheapest other model.
+  useEffect(() => {
+    if (picked || !baseline.data?.models.length || !list.length) return;
+    const top = [...baseline.data.models].sort((a, b) => b.monthlyCost - a.monthlyCost)[0];
+    const price = (id: string) => { const m = list.find((x) => x.id === id); return m ? 3 * m.costIn + m.costOut : Infinity; };
+    const cheapest = list.filter((m) => m.enabled && m.id !== top.modelId).sort((a, b) => price(a.id) - price(b.id))[0];
+    if (top.modelId !== from) setFromRaw(top.modelId);
+    if (cheapest && cheapest.id !== to) setToRaw(cheapest.id);
+  }, [baseline.data, list, picked, from, to]);
   const name = (id: string) => list.find((m) => m.id === id)?.name ?? id;
+  // Difference of the two figures as displayed (2 decimals), so "0.95 → 0.81" always reads −0.14.
+  const qualityChange = result && result.qualityFrom !== null && result.qualityTo !== null ? (Math.round(result.qualityTo * 100) - Math.round(result.qualityFrom * 100)) / 100 : null;
 
   return (
     <Page>
@@ -102,10 +119,10 @@ export default function WhatIf() {
             <TradeOff
               title="Quality on moved traffic"
               info="Latest test scores for each language and turn type the moved traffic covers (or the configured estimate before the first test run)."
-              from={result.qualityFrom.toFixed(2)}
-              to={result.qualityTo.toFixed(2)}
-              tone={result.qualityTo < result.qualityFrom - 0.005 ? 'worse' : result.qualityTo > result.qualityFrom + 0.005 ? 'better' : 'same'}
-              note={`${result.qualityTo >= result.qualityFrom ? '+' : '−'}${Math.abs(result.qualityTo - result.qualityFrom).toFixed(2)} quality`}
+              from={result.qualityFrom === null ? '—' : result.qualityFrom.toFixed(2)}
+              to={result.qualityTo === null ? '—' : result.qualityTo.toFixed(2)}
+              tone={qualityChange === null || qualityChange === 0 ? 'same' : qualityChange < 0 ? 'worse' : 'better'}
+              note={qualityChange === null ? 'No traffic moves' : `${qualityChange >= 0 ? '+' : '−'}${Math.abs(qualityChange).toFixed(2)} quality`}
             />
             <TradeOff
               title="Measured latency"
@@ -119,7 +136,7 @@ export default function WhatIf() {
             <Metric title="Blocked by customer policy" value={result.blockedPct} format={(n) => pct(n, 0)} note={`of matching turns can't move to ${name(to)}`} info="Turns whose customer policy (allowed vendors or data region) forbids the destination model. They stay where they are." />
           </motion.div>
           <p className="text-[12.5px] leading-relaxed text-ink-3">
-            Method: logged token counts re-priced at current catalogue prices and scaled to {count(result.monthlyConversations)} conversations a month. This is a projection, not a measured saving. In demo mode the logged traffic itself comes from simulated providers.
+            Method: logged token counts re-priced at current catalogue prices and scaled {result.loggedConversations != null && result.windowDays != null ? <>from {count(result.loggedConversations)} logged conversations over {count(result.windowDays)} {result.windowDays === 1 ? 'day' : 'days'} </> : null}to {count(result.monthlyConversations)} conversations a month. This is a projection, not a measured saving. In demo mode the logged traffic itself comes from simulated providers.
           </p>
         </>
       ) : null}
@@ -170,8 +187,16 @@ function Headline({ r, from, to, share, turnType }: { r: WhatIfResult; from: str
         </div>
         <div className="flex flex-col gap-3">
           <p className="text-[15px] leading-relaxed text-ink-2">
+            {r.movedTurnsPct === 0 ? (
+              <>
+                <strong className="font-medium text-ink">{from}</strong> {r.blockedPct >= 100 ? `has ${turnType === 'all' ? '' : `${turnType} `}turns, but customer policy keeps all of them away from ` : `served no ${turnType === 'all' ? '' : `${turnType} `}turns in the logged traffic, so nothing moves to `}<strong className="font-medium text-ink">{to}</strong>. Projected monthly model spend stays
+              </>
+            ) : (
+              <>
             Moving <strong className="font-medium text-ink">{share}%</strong> of {turnType === 'all' ? '' : `${turnType} `}turns from <strong className="font-medium text-ink">{from}</strong> to <strong className="font-medium text-ink">{to}</strong>
             {r.blockedPct > 0 ? `, except the ${pct(r.blockedPct)} customer policy keeps in place,` : ''} changes projected monthly model spend from
+              </>
+            )}
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <AnimatedNumber value={r.currentMonthly} format={money} className="h-display text-[28px]" />
@@ -236,9 +261,9 @@ function TradeOff({ title, from, to, tone, note, info }: { title: string; from: 
         {info ? <InfoTip content={info} label={`About ${title}`} /> : null}
       </div>
       <div className="flex flex-wrap items-baseline gap-2">
-        <motion.span key={from} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={base} className="h-display text-[22px] text-ink-2">{from}</motion.span>
+        <motion.span key={`from-${from}`} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={base} className="h-display text-[22px] text-ink-2">{from}</motion.span>
         <ArrowRight size={15} className="text-ink-3" aria-label="to" />
-        <motion.span key={to} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={base} className="h-display text-[26px]">{to}</motion.span>
+        <motion.span key={`to-${to}`} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={base} className="h-display text-[26px]">{to}</motion.span>
       </div>
       <span className={`text-[12.5px] font-medium ${tone === 'better' ? 'text-ok' : tone === 'worse' ? 'text-warn' : 'text-ink-3'}`}>{note}</span>
     </motion.div>

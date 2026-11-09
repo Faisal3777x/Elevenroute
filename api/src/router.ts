@@ -1,7 +1,7 @@
 import type { Candidate, Classification, CustomerPolicy, Language, ModelInfo, UseCase, Vendor } from '../../shared/types.ts';
 import { Breaker } from './breaker.ts';
 import { classify } from './classifier.ts';
-import { blendedCost, effectiveQuality, hasKey, state } from './store.ts';
+import { blendedCost, hasKey, type Workspace } from './store.ts';
 
 export interface DecideInput {
   message: string;
@@ -25,23 +25,18 @@ export interface Decision {
   reason: string;
 }
 
-// Sticky routing: conversation id → model id. Bounded so memory stays flat.
-const pins = new Map<string, string>();
+// Sticky routing: conversation id → model id, per workspace. Bounded so memory stays flat.
 const MAX_PINS = 20_000;
 
-export function pin(conversationId: string, modelId: string): void {
-  if (pins.size >= MAX_PINS) pins.delete(pins.keys().next().value as string);
-  pins.set(conversationId, modelId);
-}
-
-export function clearPins(): void {
-  pins.clear();
+export function pin(ws: Workspace, conversationId: string, modelId: string): void {
+  if (ws.pins.size >= MAX_PINS) ws.pins.delete(ws.pins.keys().next().value as string);
+  ws.pins.set(conversationId, modelId);
 }
 
 export const fmtCost = (c: number) => `$${c.toFixed(5)}/1k`;
 
-export function policyFor(customerId: string): CustomerPolicy {
-  return state.policies.find((p) => p.id === customerId) ?? state.policies.find((p) => p.id === 'default') ?? state.policies[0];
+export function policyFor(ws: Workspace, customerId: string): CustomerPolicy {
+  return ws.policies.find((p) => p.id === customerId) ?? ws.policies.find((p) => p.id === 'default') ?? ws.policies[0];
 }
 
 /** Why a model can't serve this customer, or null when it can. */
@@ -51,12 +46,12 @@ export function policyBlock(m: ModelInfo, policy: CustomerPolicy): string | null
   return null;
 }
 
-export function decide(input: DecideInput): Decision {
-  const { strategy, rules, languages } = state;
+export function decide(ws: Workspace, input: DecideInput): Decision {
+  const { strategy, rules, languages } = ws;
   const now = input.now ?? Date.now();
   const classification = classify(input.message, input.useCase, rules, strategy.complexThreshold);
   const turnType = classification.turnType;
-  const policy = policyFor(input.customerId);
+  const policy = policyFor(ws, input.customerId);
   const lang = languages.find((l) => l.language === input.language);
   const floor = Math.max(strategy.simpleQualityFloor, lang?.qualityFloor ?? 0, policy.qualityFloor ?? 0);
   const vendorRank = (v: Vendor) => {
@@ -67,8 +62,8 @@ export function decide(input: DecideInput): Decision {
 
   const candidates: Candidate[] = [];
   const eligible: { m: ModelInfo; q: number; c: number }[] = [];
-  for (const m of state.models) {
-    const q = effectiveQuality(m, segment);
+  for (const m of ws.models) {
+    const q = ws.effectiveQuality(m, segment);
     const c = blendedCost(m);
     let note: string | null = null;
     if (!m.enabled) note = 'disabled';
@@ -92,11 +87,15 @@ export function decide(input: DecideInput): Decision {
 
   // Sticky: keep the conversation on its first model while it is still allowed.
   let sticky = false;
-  const pinned = input.conversationId && strategy.sticky ? pins.get(input.conversationId) : undefined;
+  let released: string | null = null;
+  const pinned = input.conversationId && strategy.sticky ? ws.pins.get(input.conversationId) : undefined;
   if (pinned) {
     const idx = ordered.findIndex((e) => e.m.id === pinned);
     const upgrade = turnType === 'complex' && strategy.upgradeStickyOnComplex && idx > 0 && ordered[0].q > ordered[idx].q;
-    if (idx > 0 && !upgrade) {
+    // A simple follow-up leaves a pricier pin for the cheapest model that still clears the quality floor.
+    const downgrade = turnType === 'simple' && strategy.downgradeStickyOnSimple && idx > 0 && ordered[0].c < ordered[idx].c && ordered[0].q >= floor;
+    if (downgrade) released = ordered[idx].m.name;
+    if (idx > 0 && !upgrade && !downgrade) {
       ordered.unshift(...ordered.splice(idx, 1));
       sticky = true;
     } else if (idx === 0) sticky = true;
@@ -118,6 +117,7 @@ export function decide(input: DecideInput): Decision {
   let reason: string;
   if (!top) reason = `No eligible model for ${policy.name} (${input.language})`;
   else if (sticky) reason = `Sticky conversation → stays on ${top.m.name}`;
+  else if (released) reason = `Simple follow-up → leaves ${released} for the cheapest model with quality ≥ ${floor.toFixed(2)}: ${top.m.name} (${fmtCost(top.c)}, quality ${top.q.toFixed(2)})`;
   else if (turnType === 'simple')
     reason = `Simple turn → cheapest model with quality ≥ ${floor.toFixed(2)}: ${top.m.name} (${fmtCost(top.c)}, quality ${top.q.toFixed(2)})`;
   else reason = `Complex turn → highest-quality model: ${top.m.name} (quality ${top.q.toFixed(2)}, ${fmtCost(top.c)})`;

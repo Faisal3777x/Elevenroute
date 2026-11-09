@@ -1,8 +1,8 @@
 import type { Alert, ModelInfo, TestCase, TestResult, TestRun } from '../../shared/types.ts';
 import { TEST_CASES } from './content.ts';
-import { db, transaction } from './db.ts';
+import { db, insertMany } from './db.ts';
 import { liveCall, systemPrompt } from './providers.ts';
-import { hasKey, save, state } from './store.ts';
+import { hasKey, type Workspace } from './store.ts';
 
 interface Judged {
   reply: string;
@@ -65,17 +65,17 @@ async function pool<T>(items: (() => Promise<T>)[], size: number): Promise<T[]> 
 export const caseScore = (r: Pick<Judged, 'accuracy' | 'tone' | 'completed'>) => ((r.accuracy + r.tone) / 10) * (r.completed ? 1 : 0.6);
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
-export async function runTests(): Promise<TestRun> {
-  const mode = state.mode;
-  const models = state.models.filter((m) => m.enabled && (mode === 'demo' || hasKey(m.vendor)));
-  const judge = [...state.models].filter((m) => hasKey(m.vendor)).sort((a, b) => b.quality - a.quality)[0];
+export async function runTests(ws: Workspace): Promise<TestRun> {
+  const mode = ws.mode;
+  const models = ws.models.filter((m) => m.enabled && (mode === 'demo' || hasKey(m.vendor)));
+  const judge = [...ws.models].filter((m) => hasKey(m.vendor)).sort((a, b) => b.quality - a.quality)[0];
   if (mode === 'live' && !judge) throw new Error('Live mode needs at least one API key to run tests');
 
   const jobs = models.flatMap((m) => TEST_CASES.map((c) => async () => ({ m, c, j: mode === 'demo' ? simulatedJudge(m, c) : await liveJudge(m, c, judge) })));
   const judged = await pool(jobs, mode === 'demo' ? 64 : 6);
 
-  const prev = db.prepare('SELECT scores FROM test_runs ORDER BY id DESC LIMIT 1').get() as { scores: string } | undefined;
-  const prevScores: Record<string, number> = prev ? JSON.parse(prev.scores) : {};
+  const prev = await db.one<{ scores: Record<string, number> }>('select scores from test_runs where workspace_id = $1 order by id desc limit 1', [ws.id]);
+  const prevScores = prev?.scores ?? {};
   const ts = Date.now();
 
   const scores: Record<string, number> = {};
@@ -86,65 +86,78 @@ export async function runTests(): Promise<TestRun> {
   }
   for (const m of models) scores[m.id] = avg(Object.values(segments[m.id] ?? {}).flat());
 
-  return transaction(() => {
-    const runId = Number(db.prepare('INSERT INTO test_runs (ts, mode, scores) VALUES (?, ?, ?)').run(ts, mode, JSON.stringify(scores)).lastInsertRowid);
-    const ins = db.prepare('INSERT INTO test_results VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const { m, c, j } of judged) {
-      ins.run(runId, m.id, c.id, c.useCase, c.language, c.turnType, j.completed ? 1 : 0, j.accuracy, j.tone, j.latencyMs, caseScore(j), j.reply);
+  // Decide new exclusions and alerts first, then write everything in one transaction.
+  const alerts: unknown[][] = [];
+  const { alertDropPct, exclusionFloor } = ws.strategy;
+  const updates = models.map((m) => {
+    const score = scores[m.id];
+    const before = prevScores[m.id];
+    if (before && (before - score) / before > alertDropPct / 100) {
+      alerts.push([ws.id, ts, m.id, `${m.name} score dropped ${(((before - score) / before) * 100).toFixed(0)}% (${before.toFixed(2)} → ${score.toFixed(2)})`]);
     }
-
-    const alert = db.prepare('INSERT INTO alerts (ts, model_id, message) VALUES (?, ?, ?)');
-    const { alertDropPct, exclusionFloor } = state.strategy;
-    for (const m of models) {
-      const score = scores[m.id];
-      const before = prevScores[m.id];
-      if (before && (before - score) / before > alertDropPct / 100) {
-        alert.run(ts, m.id, `${m.name} score dropped ${(((before - score) / before) * 100).toFixed(0)}% (${before.toFixed(2)} → ${score.toFixed(2)})`);
-      }
-      const wasExcluded = m.excluded;
-      m.testScore = score;
-      m.excluded = score < exclusionFloor;
-      if (m.excluded && !wasExcluded) alert.run(ts, m.id, `${m.name} excluded from routing: score ${score.toFixed(2)} < ${exclusionFloor}`);
-      if (!m.excluded && wasExcluded) alert.run(ts, m.id, `${m.name} restored to routing: score ${score.toFixed(2)}`);
-      state.segments[m.id] = Object.fromEntries(Object.entries(segments[m.id] ?? {}).map(([k, v]) => [k, avg(v)]));
-    }
-    save('models');
-    save('segments');
-    return { id: runId, ts, mode, scores };
+    const excluded = score < exclusionFloor;
+    if (excluded && !m.excluded) alerts.push([ws.id, ts, m.id, `${m.name} excluded from routing: score ${score.toFixed(2)} < ${exclusionFloor}`]);
+    if (!excluded && m.excluded) alerts.push([ws.id, ts, m.id, `${m.name} restored to routing: score ${score.toFixed(2)}`]);
+    return { m, score, excluded, segs: Object.fromEntries(Object.entries(segments[m.id] ?? {}).map(([k, v]) => [k, avg(v)])) };
   });
+
+  const runId = await db.tx(async (q) => {
+    const id = (await q.one<{ id: number }>('insert into test_runs (workspace_id, ts, mode, scores) values ($1, $2, $3, $4::jsonb) returning id', [ws.id, ts, mode, JSON.stringify(scores)]))!.id;
+    await insertMany(
+      q,
+      'test_results',
+      ['run_id', 'workspace_id', 'model_id', 'case_id', 'use_case', 'language', 'turn_type', 'completed', 'accuracy', 'tone', 'latency_ms', 'score', 'reply'],
+      judged.map(({ m, c, j }) => [id, ws.id, m.id, c.id, c.useCase, c.language, c.turnType, j.completed, j.accuracy, j.tone, j.latencyMs, caseScore(j), j.reply]),
+    );
+    if (alerts.length) await insertMany(q, 'alerts', ['workspace_id', 'ts', 'model_id', 'message'], alerts);
+    return id;
+  });
+
+  for (const u of updates) {
+    u.m.testScore = u.score;
+    u.m.excluded = u.excluded;
+    ws.segments[u.m.id] = u.segs;
+  }
+  await ws.save('models', 'segments');
+  return { id: runId, ts, mode, scores };
 }
 
-export function listRuns(): TestRun[] {
-  return (db.prepare('SELECT * FROM test_runs ORDER BY id DESC LIMIT 20').all() as { id: number; ts: number; mode: 'demo' | 'live'; scores: string }[]).map((r) => ({
-    ...r,
-    scores: JSON.parse(r.scores),
-  }));
+export async function listRuns(ws: Workspace): Promise<TestRun[]> {
+  return db.query<TestRun>('select id, ts, mode, scores from test_runs where workspace_id = $1 order by id desc limit 20', [ws.id]);
 }
 
-export function listResults(runId?: number): TestResult[] {
-  const id = runId ?? (db.prepare('SELECT MAX(id) AS id FROM test_runs').get() as { id: number | null }).id;
+export async function listResults(ws: Workspace, runId?: number): Promise<TestResult[]> {
+  const id = runId ?? (await db.one<{ id: number | null }>('select max(id) as id from test_runs where workspace_id = $1', [ws.id]))?.id;
   if (!id) return [];
-  return (db.prepare('SELECT * FROM test_results WHERE run_id = ?').all(id) as Record<string, any>[]).map((r) => ({
-    runId: r.run_id,
-    modelId: r.model_id,
-    caseId: r.case_id,
-    useCase: r.use_case,
-    language: r.language,
-    turnType: r.turn_type,
-    completed: r.completed === 1,
-    accuracy: r.accuracy,
-    tone: r.tone,
-    latencyMs: r.latency_ms,
-    score: r.score,
-    reply: r.reply,
-  }));
+  // workspace_id in the filter so a run id from another workspace returns nothing.
+  return db.query<TestResult>(
+    `select run_id as "runId", model_id as "modelId", case_id as "caseId", use_case as "useCase", language,
+            turn_type as "turnType", completed, accuracy, tone, latency_ms as "latencyMs", score, reply
+     from test_results where run_id = $1 and workspace_id = $2`,
+    [id, ws.id],
+  );
 }
 
-export function listAlerts(): Alert[] {
-  return (db.prepare('SELECT id, ts, model_id, message FROM alerts ORDER BY id DESC LIMIT 50').all() as Record<string, any>[]).map((r) => ({
-    id: r.id,
-    ts: r.ts,
-    modelId: r.model_id,
-    message: r.message,
-  }));
+/**
+ * Deletes every test run (its results cascade) and quality alert, and undoes what runs set: models go back to
+ * their configured quality, segment scores are cleared, and no model stays excluded by a test.
+ * Traffic, routing rules, policies and model settings are kept.
+ */
+export async function clearTests(ws: Workspace): Promise<{ deletedRuns: number }> {
+  const deleted = await db.tx(async (q) => {
+    const runs = await q.query('delete from test_runs where workspace_id = $1 returning 1', [ws.id]);
+    await q.query('delete from alerts where workspace_id = $1', [ws.id]);
+    return runs.length;
+  });
+  for (const m of ws.models) {
+    m.testScore = null;
+    m.excluded = false;
+  }
+  ws.segments = {};
+  await ws.save('models', 'segments');
+  return { deletedRuns: deleted };
+}
+
+export async function listAlerts(ws: Workspace): Promise<Alert[]> {
+  return db.query<Alert>('select id, ts, model_id as "modelId", message from alerts where workspace_id = $1 order by id desc limit 50', [ws.id]);
 }

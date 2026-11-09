@@ -31,7 +31,7 @@ export function VendorControls({ compact = false, onChange }: { compact?: boolea
       {data.map((v) => (
         <motion.div layout key={v.vendor} className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-[140px] items-center gap-2">
-            <Orb model={{ vendor: v.vendor, tier: 'flagship' }} size={compact ? 18 : 22} />
+            <Orb model={{ vendor: v.vendor, tier: 'flagship' }} size={compact ? 18 : 22} live={v.state} />
             <span className="text-[14px] font-medium">{VENDOR_SHORT[v.vendor]}</span>
             {!compact ? <Status kind={v.state} /> : null}
             {v.breakerOpen ? <Status kind="warn" label="Breaker open" /> : null}

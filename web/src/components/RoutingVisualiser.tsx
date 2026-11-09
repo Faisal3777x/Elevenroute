@@ -1,12 +1,15 @@
-import { Check, Cpu, Pause, Play, RotateCcw, User, X } from 'lucide-react';
+import { animate, stagger, svg, utils } from 'animejs';
+import { Check, ChevronDown, ListTree, Pause, Play, User, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 
 import type { Candidate, Language, ModelInfo, RouteTrace, TurnType } from '../../../shared/types';
+import { useOnScreen } from '../lib/anime';
 import { money, ms } from '../lib/format';
 import { base, fast } from '../lib/motion';
 import { BAD, sortModels, VENDOR_SHORT, VIOLET } from '../lib/theme';
-import { Orb } from './Orb';
+import { BrandOrb, Orb } from './Orb';
 import { TurnBadge } from './ui';
 
 /** One routing decision to visualise. Built only from real API responses. */
@@ -27,6 +30,7 @@ export interface RouteRun {
 }
 
 type Step =
+  | { k: 'idle'; ms: number }
   | { k: 'request'; ms: number }
   | { k: 'classify'; ms: number }
   | { k: 'checks'; ms: number }
@@ -37,7 +41,8 @@ type Step =
   | { k: 'done'; ms: number };
 
 function buildSteps(run: RouteRun): Step[] {
-  const steps: Step[] = [{ k: 'request', ms: 750 }, { k: 'classify', ms: 1100 }, { k: 'checks', ms: 1000 }];
+  // 'idle' starts each loop: the previous route fades out calmly before the next request travels.
+  const steps: Step[] = [{ k: 'idle', ms: 650 }, { k: 'request', ms: 750 }, { k: 'classify', ms: 1100 }, { k: 'checks', ms: 1000 }];
   if (run.kind === 'chat') {
     run.trace.attempts.forEach((a, i) => {
       steps.push({ k: 'try', i, ms: 700 });
@@ -104,15 +109,41 @@ function curveUser(L: Layout): Curve {
   return [a, a, b, b];
 }
 const d = ([a, b, c, e]: Curve) => `M${a.x},${a.y} C${b.x},${b.y} ${c.x},${c.y} ${e.x},${e.y}`;
-function sample([a, b, c, e]: Curve, n = 24): Pt[] {
-  return Array.from({ length: n + 1 }, (_, i) => {
-    const t = i / n;
-    const u = 1 - t;
-    return {
-      x: u * u * u * a.x + 3 * u * u * t * b.x + 3 * u * t * t * c.x + t * t * t * e.x,
-      y: u * u * u * a.y + 3 * u * u * t * b.y + 3 * u * t * t * c.y + t * t * t * e.y,
-    };
-  });
+/** The same curve, drawn from its end back to its start (for the response travelling back). */
+const dReverse = ([a, b, c, e]: Curve) => `M${e.x},${e.y} C${c.x},${c.y} ${b.x},${b.y} ${a.x},${a.y}`;
+
+/** Lines drawing in and out (anime.js drawables). */
+const DRAW_IN_MS = 720;
+const DRAW_OUT_MS = 520;
+
+/**
+ * SVG paths for the current step: the one the travelling dot follows, and the chosen connection the
+ * light keeps flowing along. Computed before render so the anime.js effects can depend on them.
+ */
+function routePaths(run: RouteRun | null, steps: Step[], idx: number, L: Layout | null): { signalD: string | null; flowD: string | null } {
+  const current = steps[idx];
+  if (!run || !L || !current) return { signalD: null, flowD: null };
+  const attempts = run.trace.attempts;
+  const plannedId = planned(run)?.modelId;
+  const selectedId = run.kind === 'chat' ? run.modelUsed ?? null : plannedId ?? null;
+  let signalD: string | null = null;
+  if (current.k === 'request') signalD = d(curveUser(L));
+  if (current.k === 'try') {
+    const id = current.i === -1 ? plannedId : attempts[current.i]?.modelId;
+    const p = id ? L.models.get(id) : undefined;
+    if (p) signalD = d(curveToModel(L, p));
+  }
+  if (current.k === 'response' && selectedId) {
+    const p = L.models.get(selectedId);
+    if (p) {
+      const u = curveUser(L);
+      // Back along the model's connection, through the router, then back to the customer.
+      signalD = `${dReverse(curveToModel(L, p))} L${u[3].x},${u[3].y} ${dReverse(u).replace(/^M[^C]*/, '')}`;
+    }
+  }
+  const selIdx = steps.findIndex((st) => st.k === 'selected');
+  const target = selectedId && selIdx >= 0 && idx >= selIdx ? L.models.get(selectedId) : undefined;
+  return { signalD, flowD: target ? d(curveToModel(L, target)) : null };
 }
 
 /** Width of an element, tracked with a callback ref so it follows whichever element is mounted. */
@@ -129,6 +160,9 @@ function useWidth() {
   return [setEl, w] as const;
 }
 
+/** How long the finished route stays on screen before the loop starts again. */
+const LOOP_HOLD_MS = 2200;
+
 // ---------- component ----------
 export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }: { run: RouteRun | null; models: ModelInfo[]; autoPlay?: boolean; placeholder?: ReactNode }) {
   const reduce = useReducedMotion();
@@ -136,22 +170,95 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
   const last = Math.max(0, steps.length - 1);
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(autoPlay);
+  // Off-screen the loop holds its place instead of re-rendering a diagram nobody can see.
+  const [screenRef, onScreen] = useOnScreen<HTMLDivElement>();
   const [ref, width] = useWidth();
 
-  // New run: start again (or jump to the end when motion is reduced).
+  // New run: start straight at the request (or jump to the end when motion is reduced).
   useEffect(() => {
-    setIdx(reduce ? last : 0);
+    setIdx(reduce ? last : 1);
     setPlaying(!reduce && autoPlay);
   }, [run, reduce, autoPlay, last]);
 
   useEffect(() => {
-    if (!playing || reduce || idx >= last) return;
-    const t = setTimeout(() => setIdx((i) => Math.min(last, i + 1)), steps[idx]?.ms ?? 600);
+    if (!playing || reduce || !onScreen) return;
+    // Loop forever: hold the final route, then go back to 'idle' (a calm reset). Pause stops it.
+    const t = idx >= last ? setTimeout(() => setIdx(0), LOOP_HOLD_MS) : setTimeout(() => setIdx((i) => Math.min(last, i + 1)), steps[idx]?.ms ?? 600);
     return () => clearTimeout(t);
-  }, [playing, idx, last, steps, reduce]);
+  }, [playing, idx, last, steps, reduce, onScreen]);
 
   const ordered = useMemo(() => sortModels(models), [models]);
   const L = useMemo(() => (width ? layout(width, ordered) : null), [width, ordered]);
+  const { signalD, flowD } = routePaths(run, steps, idx, L);
+
+  // anime.js drives every connection line and the travelling dot.
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dotRef = useRef<SVGGElement>(null);
+  const signalPathRef = useRef<SVGPathElement>(null);
+  const flowRef = useRef<SVGPathElement>(null);
+  const drawn = useRef(new Map<string, boolean>());
+
+  // Connections: draw in along the curve when a step activates them, wipe out forward when they end.
+  // Runs after every render but only animates lines whose on/off state actually changed.
+  useEffect(() => {
+    const root = svgRef.current;
+    if (!root) return;
+    root.querySelectorAll<SVGPathElement>('[data-conn]').forEach((el) => {
+      const key = el.dataset.conn!;
+      const on = el.dataset.on === '1';
+      const was = drawn.current.get(key);
+      if (was === on) return;
+      drawn.current.set(key, on);
+      const [line] = svg.createDrawable(el);
+      if (reduce || (was === undefined && !on)) {
+        line.setAttribute('draw', on ? '0 1' : '0 0');
+        return;
+      }
+      animate(line, on
+        ? { draw: ['0 0', '0 1'], duration: DRAW_IN_MS, ease: 'inOutSine' }
+        : { draw: ['0 1', '1 1'], duration: DRAW_OUT_MS, ease: 'inOutSine' });
+    });
+  });
+
+  // The dot follows the exact path for this step, fading in at the start and out on arrival.
+  useEffect(() => {
+    const dot = dotRef.current;
+    const guide = signalPathRef.current;
+    if (!dot) return;
+    const step = steps[idx];
+    if (reduce || !step || !guide || !signalD) {
+      utils.set(dot, { opacity: 0 });
+      return;
+    }
+    const { translateX, translateY } = svg.createMotionPath(guide);
+    const dur = Math.max(300, step.ms * 0.92);
+    const anim = animate(dot, {
+      translateX,
+      translateY,
+      opacity: [{ to: 1, duration: dur * 0.18 }, { to: 1, duration: dur * 0.64 }, { to: 0, duration: dur * 0.18 }],
+      duration: dur,
+      ease: 'inOutSine',
+    });
+    return () => {
+      anim.pause();
+    };
+  }, [idx, signalD, steps, reduce]);
+
+  // Light keeps flowing along the chosen connection until the next cycle begins.
+  useEffect(() => {
+    const el = flowRef.current;
+    if (!el) return;
+    const [light] = svg.createDrawable(el);
+    if (reduce || !flowD || !onScreen) {
+      light.setAttribute('draw', '0 0');
+      return;
+    }
+    const anim = animate(light, { draw: ['0 0', '0 0.16', '0.84 1', '1 1'], duration: 1700, delay: 250, loop: true, loopDelay: 350, ease: 'inOutSine' });
+    return () => {
+      anim.pause();
+      light.setAttribute('draw', '0 0');
+    };
+  }, [flowD, reduce, onScreen]);
 
   if (!run) {
     return (
@@ -170,7 +277,6 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
   const attempts = run.trace.attempts;
   const cand = (id: string) => run.trace.candidates.find((c) => c.modelId === id);
   const plannedId = planned(run)?.modelId;
-  const selectedId = run.kind === 'chat' ? run.modelUsed ?? null : plannedId ?? null;
   const eligibleCount = run.trace.candidates.filter((c) => c.eligible).length;
 
   function stateOf(id: string): NodeState {
@@ -188,48 +294,22 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
     return c?.eligible ? 'eligible' : 'ineligible';
   }
 
-  // Signal dot path for the current step.
-  let signal: Pt[] | null = null;
-  let signalColor = VIOLET;
-  if (L && !reduce && current) {
-    if (current.k === 'request') signal = sample(curveUser(L));
-    if (current.k === 'try') {
-      const id = current.i === -1 ? plannedId : attempts[current.i]?.modelId;
-      const p = id ? L.models.get(id) : undefined;
-      if (p) signal = sample(curveToModel(L, p));
-    }
-    if (current.k === 'response' && selectedId) {
-      const p = L.models.get(selectedId);
-      if (p) signal = [...sample(curveToModel(L, p)).reverse(), ...sample(curveUser(L)).reverse()];
-    }
-    if (current.k === 'result' && attempts[current.i] && !attempts[current.i].ok) signalColor = BAD;
-  }
-
   const summary = run.kind === 'chat'
     ? `${run.turnType} turn routed to ${models.find((m) => m.id === run.modelUsed)?.name ?? 'a human handoff'}${run.failover ? ' after a failover' : ''}.`
     : `Dry run: ${run.turnType} turn would route to ${cand(plannedId ?? '')?.name ?? 'no eligible model'}.`;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={screenRef} className="flex flex-col gap-4">
       <div ref={ref} className="relative w-full overflow-hidden rounded-[18px] border border-line bg-canvas" style={{ height: L?.h ?? 450 }} role="img" aria-label={`Routing diagram. ${summary}`}>
         {/* faint grid */}
         <div aria-hidden="true" className="absolute inset-0 opacity-[0.5]" style={{ backgroundImage: 'radial-gradient(circle, #e6e1dc 1px, transparent 1px)', backgroundSize: '22px 22px' }} />
         {L && (
           <>
-            <svg className="absolute inset-0" width={L.w} height={L.h} viewBox={`0 0 ${L.w} ${L.h}`} aria-hidden="true" style={{ willChange: 'transform' }}>
+            <svg ref={svgRef} className="absolute inset-0" width={L.w} height={L.h} viewBox={`0 0 ${L.w} ${L.h}`} aria-hidden="true">
               {/* user ↔ router */}
               <path d={d(curveUser(L))} fill="none" stroke="#d9d3cd" strokeWidth={1.5} />
-              <motion.path
-                d={d(curveUser(L))}
-                fill="none"
-                stroke={VIOLET}
-                strokeWidth={2}
-                strokeLinecap="round"
-                initial={false}
-                animate={{ pathLength: at('request') ? 1 : 0, opacity: at('request') ? 0.7 : 0 }}
-                transition={reduce ? { duration: 0 } : { duration: 0.7, ease: 'easeInOut' }}
-              />
-              {/* router → models */}
+              <path data-conn="user" data-on={at('request') ? '1' : '0'} d={d(curveUser(L))} fill="none" stroke={VIOLET} strokeOpacity={0.7} strokeWidth={2} strokeLinecap="round" />
+              {/* router → models: grey base line, plus a coloured line that anime.js draws in and out */}
               {ordered.map((m) => {
                 const p = L.models.get(m.id)!;
                 const s = stateOf(m.id);
@@ -237,40 +317,36 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
                 const active = s === 'trying' || s === 'selected' || s === 'failed' || s === 'planned';
                 return (
                   <g key={m.id}>
-                    <motion.path
+                    <path
                       d={path}
                       fill="none"
                       stroke={s === 'ineligible' ? '#e3ddd7' : '#d9d3cd'}
                       strokeWidth={1.5}
                       strokeDasharray={s === 'ineligible' ? '3 5' : undefined}
-                      animate={{ opacity: s === 'ineligible' ? 0.6 : 1 }}
-                      transition={fast}
+                      style={{ opacity: s === 'ineligible' ? 0.6 : 1, transition: 'opacity 300ms ease' }}
                     />
-                    <motion.path
+                    <path
+                      data-conn={m.id}
+                      data-on={active ? '1' : '0'}
                       d={path}
                       fill="none"
                       stroke={s === 'failed' ? BAD : VIOLET}
+                      strokeOpacity={s === 'failed' ? 0.75 : s === 'planned' ? 0.6 : 0.85}
                       strokeWidth={s === 'selected' ? 2.6 : 2}
                       strokeLinecap="round"
-                      strokeDasharray={s === 'planned' ? '6 6' : undefined}
-                      initial={false}
-                      animate={{ pathLength: active ? 1 : 0, opacity: active ? (s === 'failed' ? 0.75 : 0.85) : 0 }}
-                      transition={reduce ? { duration: 0 } : { duration: 0.65, ease: 'easeInOut' }}
+                      style={{ transition: 'stroke 300ms ease, stroke-opacity 300ms ease, stroke-width 300ms ease' }}
                     />
                   </g>
                 );
               })}
-              {signal && (
-                // Moved with transforms (GPU-friendly); the halo is a second circle, not a CSS filter.
-                <motion.g
-                  key={`sig-${idx}`}
-                  initial={{ x: signal[0].x, y: signal[0].y, opacity: 0 }}
-                  animate={{ x: signal.map((p) => p.x), y: signal.map((p) => p.y), opacity: [0, 1, 1, 1, 0.9] }}
-                  transition={{ duration: ((current?.ms ?? 700) / 1000) * 0.85, ease: 'easeInOut' }}>
-                  <circle r={11} fill={signalColor} opacity={0.18} />
-                  <circle r={5} fill={signalColor} />
-                </motion.g>
-              )}
+              {/* flowing light along the chosen connection */}
+              <path ref={flowRef} d={flowD ?? 'M0,0'} fill="none" stroke="#fff" strokeOpacity={0.95} strokeWidth={2.4} strokeLinecap="round" />
+              {/* invisible guide the dot follows, and the dot itself (moved with transforms, no filters) */}
+              <path ref={signalPathRef} d={signalD ?? 'M0,0'} fill="none" stroke="none" />
+              <g ref={dotRef} style={{ opacity: 0 }}>
+                <circle r={11} fill={VIOLET} opacity={0.18} />
+                <circle r={5} fill={VIOLET} />
+              </g>
             </svg>
 
             {L.labels.map((l) => (
@@ -305,8 +381,11 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
                 transition={base}
               />
               <div className="relative rounded-2xl border border-ink/80 bg-ink px-3.5 py-3 text-white shadow-[var(--shadow-card)]">
-                <div className="flex items-center gap-1.5 text-[12px] font-medium">
-                  <Cpu size={13} aria-hidden="true" /> ElevenRoute router
+                <div className="flex items-center gap-2 text-[12.5px] font-medium">
+                  <span className="inline-flex h-[22px] w-[22px] shrink-0 rounded-full ring-1 ring-white/25">
+                    <BrandOrb size={22} live={!reduce} drift={false} />
+                  </span>
+                  ElevenRoute router
                 </div>
                 <AnimatePresence initial={false}>
                   {at('classify') && (
@@ -342,23 +421,21 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
           <>
             <button
               type="button"
-              onClick={() => (idx >= last ? (setIdx(0), setPlaying(true)) : setPlaying(!playing))}
+              onClick={() => setPlaying(!playing)}
               className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-canvas px-3.5 text-[13px] font-medium hover:border-ink/25">
-              {playing && idx < last ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
-              {playing && idx < last ? 'Pause' : idx >= last ? 'Play again' : 'Play'}
-            </button>
-            <button type="button" onClick={() => { setIdx(0); setPlaying(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-ink-2 hover:bg-card hover:text-ink">
-              <RotateCcw size={14} aria-hidden="true" /> Replay
+              {playing ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
+              {playing ? 'Pause' : 'Play'}
             </button>
             <div className="h-1.5 min-w-[120px] flex-1 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuemin={0} aria-valuemax={last} aria-valuenow={idx} aria-label="Routing animation progress">
               <motion.div className="h-full rounded-full bg-ink" animate={{ width: `${last ? (idx / last) * 100 : 100}%` }} transition={base} />
             </div>
           </>
         )}
-        <span className="text-[12px] text-ink-3">{run.kind === 'chat' ? 'Real routing trace' : 'Dry run: decision only, no model call'}</span>
       </div>
 
-      <StepLog run={run} steps={steps} idx={idx} models={models} />
+      <TracePanel label={run.kind === 'chat' ? 'Real routing trace' : 'Dry run: decision only, no model call'} count={run.trace.attempts.length}>
+        <StepLog run={run} steps={steps} idx={idx} models={models} />
+      </TracePanel>
     </div>
   );
 }
@@ -400,7 +477,7 @@ function ModelNode({ x, y, w, model, cand, state, attempt, reduce, compact }: {
           className="absolute inset-0 rounded-2xl border-2 border-violet"
           initial={{ opacity: 0.6, scale: 1 }}
           animate={{ opacity: 0, scale: 1.12 }}
-          transition={{ duration: 1.1, repeat: 2, ease: 'easeOut' }}
+          transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 0.4, ease: 'easeOut' }}
         />
       )}
       <div className={`relative flex items-center gap-2 rounded-2xl border bg-canvas px-2.5 ${compact ? 'py-1.5' : 'py-2'} transition-[border-color,box-shadow,opacity] duration-300 ${styles[state]}`}>
@@ -417,6 +494,73 @@ function ModelNode({ x, y, w, model, cand, state, attempt, reduce, compact }: {
           )}
         </AnimatePresence>
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Real routing trace" button that morphs into the step-by-step trace (anime.js): the pill's width, height
+ * and corner radius tween to the card's size, then the steps cascade in. The close button morphs it back.
+ * With reduced motion it simply opens and closes.
+ */
+function TracePanel({ label, count, children }: { label: string; count: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const shell = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
+  const panelId = useId();
+
+  const toggle = () => {
+    const el = shell.current;
+    if (!el) return setOpen(!open);
+    const from = el.getBoundingClientRect();
+    flushSync(() => setOpen(!open)); // render the other state now so its natural size can be measured
+    if (reduce) return;
+    const to = el.getBoundingClientRect();
+    const opening = !open;
+    animate(el, {
+      width: [from.width, to.width],
+      height: [from.height, to.height],
+      borderRadius: opening ? ['999px', '18px'] : ['18px', '999px'],
+      duration: opening ? 820 : 560,
+      ease: opening ? 'inOutQuart' : 'inOutQuad',
+      onComplete: () => {
+        // Hand sizing back to the layout: the trace keeps growing while the replay runs.
+        el.style.width = '';
+        el.style.height = '';
+        el.style.borderRadius = '';
+      },
+    });
+    animate(el.querySelectorAll('[data-trace-content]'), { opacity: [0, 1], duration: opening ? 420 : 280, delay: opening ? 300 : 160, ease: 'outQuad' });
+    if (opening) {
+      animate(el.querySelectorAll('[data-trace-item]'), { opacity: [0, 1], y: [10, 0], duration: 460, delay: stagger(60, { start: 420 }), ease: 'outQuad' });
+    }
+  };
+
+  return (
+    <div
+      ref={shell}
+      className={`overflow-hidden border bg-canvas ${open ? 'w-full rounded-[18px] border-line' : 'w-fit rounded-full border-line hover:border-ink/25'}`}>
+      {open ? (
+        <div data-trace-content id={panelId} className="p-4 sm:p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[13.5px] font-medium text-ink">
+              <BrandOrb size={18} live={!reduce} drift={false} />
+              {label}
+            </div>
+            <button type="button" onClick={toggle} aria-expanded="true" aria-controls={panelId} className="inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium text-ink-2 hover:bg-card hover:text-ink">
+              <X size={14} aria-hidden="true" /> Close
+            </button>
+          </div>
+          {children}
+        </div>
+      ) : (
+        <button type="button" data-trace-content onClick={toggle} aria-expanded="false" className="inline-flex h-9 items-center gap-2 px-3.5 text-[13px] font-medium text-ink">
+          <ListTree size={14} aria-hidden="true" />
+          {label}
+          {count > 0 ? <span className="rounded-full bg-card px-2 py-0.5 text-[11.5px] text-ink-2">{count} model call{count === 1 ? '' : 's'}</span> : null}
+          <ChevronDown size={14} className="text-ink-3" aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 }
@@ -484,7 +628,7 @@ function StepLog({ run, steps, idx, models }: { run: RouteRun; steps: Step[]; id
     <ol className="flex flex-col gap-2" aria-label="Routing steps">
       <AnimatePresence initial={false}>
         {items.map((it, i) => (
-          <motion.li key={it.key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={base} className="flex gap-3">
+          <motion.li key={it.key} data-trace-item initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={base} className="flex gap-3">
             <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${it.tone === 'bad' ? 'bg-bad text-white' : it.tone === 'ok' ? 'bg-ok text-white' : 'bg-line text-ink'}`}>{i + 1}</span>
             <div className="min-w-0 text-[13px] leading-relaxed">
               <div className="font-medium text-ink">{it.title}</div>

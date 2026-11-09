@@ -4,7 +4,8 @@ Model-agnostic routing for voice and chat agents. ElevenRoute sits between custo
 
 | Part | Stack | Where |
 |---|---|---|
-| Router API | Node.js 24+ and TypeScript, built-in `node:sqlite` and `node:http`, no runtime dependencies | `api/` |
+| Router API | Node.js 24+ and TypeScript, `node:http`; Postgres via `postgres` (Supabase) or `@electric-sql/pglite` (local), `jose` for sign-in tokens | `api/` |
+| Database and sign-in | Supabase: Postgres with row-level security, Supabase Auth (email + password, magic link, Google) | `api/migrations/` |
 | Web dashboard | React 19, Vite 8, TypeScript, Tailwind CSS 4, Recharts 3, Motion for React | `web/` |
 | Phone app | Expo SDK 58, React Native 0.88, Expo Router, TypeScript, react-native-svg | `app/` |
 | Shared types | TypeScript types used by all three | `shared/types.ts` |
@@ -31,9 +32,10 @@ On Windows, allow Node.js through the firewall on private networks when prompted
 | `npm run traffic` | send 500 synthetic conversations through the router |
 | `npm run traffic:clear` | delete all logged traffic; keep models, rules, policies and test results (same as **Reset traffic** on Overview) |
 | `npm run reset` | wipe traffic, tests and edits, then re-seed the demo |
-| `npm run web` | Expo dev server with the web dashboard opened |
-| `npm run share` | share the dashboard with your team on your network, password protected (see below) |
-| `npm run share:public` | the same, plus a public HTTPS link anyone can open with the password |
+| `npm run web` | web dashboard only (Vite on :5173) |
+| `npm run dev:local` | for editing: website on :5173 + API on :8001 with **sign-in off** and a local database (`api/data/pglite`), ignoring the Supabase settings. Runs alongside `share` / `share:public` |
+| `npm run share` | share the dashboard with your team on your network, open to everyone (see below) |
+| `npm run share:public` | the same, plus a public HTTPS link anyone can open |
 
 ## Share with your team
 
@@ -41,21 +43,43 @@ On Windows, allow Node.js through the firewall on private networks when prompted
 
 1. Close the "ElevenRoute API" window or stop `npm run dev`. Sharing runs its own copy of the API on port 8000.
 2. Run `npm run share:public` for teammates anywhere, or `npm run share` for teammates on the same Wi-Fi or office network.
-3. Send them the links printed in the window: the web dashboard link and, for phones, the Expo Go link (`exp://<your-ip>:8081`, with `npm run app` running in another window). On the same network neither needs a password. The public link asks for a username (anything) and the password.
+3. Send them the links printed in the window: the web dashboard link and, for phones, the Expo Go link (`exp://<your-ip>:8081`, with `npm run app` running in another window). Nobody needs a password or an account: the public link opens on the landing page, and "Open dashboard" goes straight in.
 
 | | `npm run share` | `npm run share:public` |
 |---|---|---|
-| Who can open it | people on your network: web dashboard and Expo Go | also anyone with the public link and password (web dashboard) |
+| Who can open it | people on your network: web dashboard and Expo Go | also anyone with the public link (web dashboard) |
 | Link | `http://<your-ip>:8000`, `exp://<your-ip>:8081` | `https://<random>.trycloudflare.com` (new each run) |
-| Password | none, like `npm run dev` | required on the public link |
+| Password | none | none, unless you set `SHARE_PASSWORD` |
 | Needs | Windows firewall allowing Node.js | internet; `cloudflared` (downloaded to `tools/` on first run on Windows) |
 
 - The dashboard is built (`web/dist`) and served by the API itself on one port. It calls the API under `/api/...`.
-- **Password:** set `SHARE_PASSWORD` (8+ characters) in `.env` to keep the same one; otherwise each run prints a new random password. It's required for requests through the tunnel (except `/health`). Direct connections on your network stay open so Expo Go keeps working; set `REQUIRE_PASSWORD_LOCALLY=1` to guard those too (the phone app then can't connect).
+- **Password (optional):** set `SHARE_PASSWORD` (8+ characters) in `.env` to require it on the public link (username: anything). Without it the link is open to everyone. It applies only to requests through the tunnel (except `/health`) and only while sign-in is off. Direct connections on your network stay open so Expo Go keeps working; set `REQUIRE_PASSWORD_LOCALLY=1` to guard those too (the phone app then can't connect).
 - **Your computer must stay on**, with the share window open. Closing it stops sharing.
-- **Everyone shares one demo.** Teammates can generate or reset traffic, edit models and rules, and switch to Live mode, which spends API credit if keys are in `.env`.
+- **Everyone shares one demo.** With sign-in off, visitors share one workspace: they can generate or reset traffic and edit models and rules. Live mode is locked (`DEMO_ONLY=1`), so nobody can spend the API keys in `.env`.
 - **Expo Go for teammates elsewhere** needs both Metro and the API on public addresses (`npx expo start --tunnel` plus `EXPO_PUBLIC_API_URL`), or a deployed API with an EAS Update. On the same network it works as is.
-- For a permanent link, deploy the API with `SERVE_WEB=1` and `ACCESS_PASSWORD` set to a host such as Render, Railway or Fly.io (needs a persistent disk for `api/data/`), and put single sign-on in front of it before using real keys or data.
+- **With Supabase sign-in on**, the share password is not used: every teammate signs in with their own account and gets their own workspace.
+- For a permanent link, deploy the API with `SERVE_WEB=1` and the Supabase settings to a host such as Render, Railway or Fly.io. With Supabase as the database, the host needs no disk.
+
+## Database, sign-in and workspaces
+
+**Sign-in is currently off (open access).** `SUPABASE_URL` in `.env` and `VITE_SUPABASE_*` in `web/.env.local` are commented out, so nobody signs in and everyone shares one workspace. Data still goes to Supabase Postgres through `DATABASE_URL` (migration `0003_open_access` lets the shared local user own a workspace there). Uncomment those lines to bring sign-in back.
+
+Without Supabase settings everything runs locally: an embedded Postgres (PGlite) in `api/data/pglite` and sign-in off (every request acts as one local user). With Supabase:
+
+| Where | Settings |
+|---|---|
+| `.env` (API) | `SUPABASE_URL`, `DATABASE_URL` (Session pooler connection string, IPv4), optional `LIVE_MODE_EMAILS` |
+| `web/.env.local` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` |
+| `app/.env.local` | `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
+
+- **Workspaces.** Each user gets a personal workspace on first sign-in, seeded with the demo setup. Models, rules, policies, traffic, test runs and alerts all belong to a workspace (`workspace_id`), and `workspace_members` links users to workspaces, so shared team workspaces can be added later without reshaping tables.
+- **Who sees what.** The API verifies the Supabase access token on every request (`Authorization: Bearer`, checked locally against the project's published keys) and scopes every query to the caller's workspace. Row-level security in Supabase allows signed-in users to read only their own workspaces' rows and allows no writes through the public API, so the publishable key exposes nothing.
+- **Migrations** live in `api/migrations/` and run automatically when the API starts (`*.supabase.sql` only on Supabase). They're recorded in `schema_migrations`.
+- **Live mode** spends the server's API keys, so only emails in `LIVE_MODE_EMAILS` can switch their workspace to it.
+- **Local cache (web).** The dashboard keeps every API response in a TanStack Query cache saved in the browser: pages open instantly with the last data and refresh in the background; changes refresh affected pages. The cache is keyed by user and wiped on sign-out.
+- **Phone app** signs in with email and password (magic links and Google are on the web).
+
+Supabase dashboard settings: Authentication → URL Configuration must list every address the dashboard is opened from (for example `http://localhost:5173`, `http://localhost:8000`, `http://<your-ip>:8000`), or email links and Google sign-in can't return to it. Google sign-in also needs a Google OAuth client added under Authentication → Providers → Google.
 
 ## Modes
 
@@ -116,7 +140,10 @@ Overview, Playground, Providers and Tests tabs on iOS and Android (Expo Go). Its
 | POST, GET | `/tests/run`, `/tests/cases`, `/tests/results`, `/tests/runs`, `/alerts` | test suite |
 | POST, GET | `/traffic/generate`, `/traffic/status`, `/traffic/clear` | synthetic traffic; clear deletes logged turns only |
 | GET, POST | `/config`, `/mode` | mode switch; key presence only |
-| POST | `/reset` | re-seed the demo |
+| POST | `/reset` | re-seed your workspace with the demo setup |
+| GET | `/me` | signed-in user, their workspace, whether sign-in and Supabase are on |
+
+Every endpoint except `/health` needs `Authorization: Bearer <Supabase access token>` when `SUPABASE_URL` is set, and acts on the caller's workspace only.
 
 ## Layout
 
@@ -133,7 +160,11 @@ api/src/
   evaluation.ts    test runner, judges, alerts, automatic exclusion
   stats.ts         dashboard aggregations and what-if
   traffic.ts       synthetic conversations and incident replay
-  store.ts, seed.ts, db.ts   cached config, seed data, SQLite
+  auth.ts          verifies Supabase sign-in tokens; live-mode allow-list
+  store.ts         workspaces: per-workspace cached config, pins, breaker; save to workspace_settings
+  db.ts            Postgres: Supabase (DATABASE_URL) or embedded PGlite; migrations; batched inserts
+  seed.ts          demo setup for new workspaces
+api/migrations/    SQL schema and row-level security
 api/test/          router, failover and end-to-end API tests
 web/src/
   App.tsx          shell: sidebar / pill navigation, mode banner and switch, page transitions
@@ -150,7 +181,8 @@ shared/types.ts    API types shared by api/, web/ and app/
 - **Live mode** calls the vendor APIs directly but hasn't been run against real keys. Check the model names (`liveModel`) and prices in Providers first.
 - **The classifier** is rules-based. A small learned classifier trained on logged turns and judge labels is the next step.
 - **Sticky conversations** that start complex stay on the flagship model for later simple turns. That keeps one voice per call but costs more; consider a "downgrade on simple turns" option if cost matters more.
-- **State** (circuit breaker, sticky pins, cached config) lives in one process. Use Redis or similar for multiple instances.
-- **Login** is one shared password when sharing (`npm run share`), none in development. Use single sign-on for real deployments.
+- **In-process state** per workspace (circuit breaker, sticky pins, simulated outage switches, cached config) lives in one API process. Run one instance, or move it to Redis or similar for several.
+- **Workspaces are personal.** Inviting teammates into a shared workspace (roles are already in `workspace_members`) is the next step.
+- **Supabase emails** use Supabase's built-in sender, limited to a few emails per hour. Add your own SMTP under Authentication → Emails before inviting a team.
 - **App icon and splash** are still the Expo defaults. Replace the images in `app/assets/images`.
 - **Store builds** need an HTTPS API (`EXPO_PUBLIC_API_URL`). Bundle id and package name are set to `com.elevenroute.app`.

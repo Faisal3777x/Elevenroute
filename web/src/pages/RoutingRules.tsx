@@ -8,7 +8,6 @@ import type {
 import { Collapse } from '../components/Collapse';
 import { Orb } from '../components/Orb';
 import { RoutingVisualiser } from '../components/RoutingVisualiser';
-import { InfoTip } from '../components/Tooltip';
 import { Button, Card, Chip, ErrorNote, Field, Page, PageHeader, Segmented, Skeleton, Status, TextArea, Toggle, TurnBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { LANGS, money, USE_CASES } from '../lib/format';
@@ -39,7 +38,6 @@ export default function RoutingRules() {
       {cfg.data ? (
         <>
           <Preview config={cfg.data} models={models.data ?? []} />
-          <QualityScale config={cfg.data} models={models.data ?? []} />
           <PolicyEditor initial={cfg.data.policies} models={models.data ?? []} onSaved={cfg.reload} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <StrategyEditor initial={cfg.data.strategy} onSaved={cfg.reload} />
@@ -54,10 +52,23 @@ export default function RoutingRules() {
 
 function useSaver<T>(path: string, wrap: (v: T) => unknown, onSaved: () => void) {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | { error: string }>('idle');
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+  const markDirty = () => {
+    setDirty(true);
+    setState((s) => (typeof s === 'object' ? 'idle' : s));
+  };
+  const fail = (error: string) => setState({ error });
   const save = async (value: T) => {
     setState('saving');
     try {
       await api.put(path, wrap(value));
+      setDirty(false);
       setState('saved');
       onSaved();
       setTimeout(() => setState('idle'), 2500);
@@ -69,9 +80,10 @@ function useSaver<T>(path: string, wrap: (v: T) => unknown, onSaved: () => void)
     <AnimatePresence>
       {state === 'saved' && <motion.span key="ok" initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={base}><Status kind="ok" label="Saved" /></motion.span>}
       {typeof state === 'object' && <motion.span key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><Status kind="fail" label={state.error} /></motion.span>}
+      {dirty && state === 'idle' && <motion.span key="dirty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><Status kind="warn" label="Unsaved changes" /></motion.span>}
     </AnimatePresence>
   );
-  return { save, saving: state === 'saving', note };
+  return { save, saving: state === 'saving', note, markDirty, fail };
 }
 
 // ---------- live preview ----------
@@ -115,7 +127,7 @@ function Preview({ config, models }: { config: RoutingConfig; models: ModelInfo[
           <TextArea label="Customer message" value={message} onChange={(e) => setMessage(e.target.value)} rows={3} />
           <div className="flex flex-wrap gap-3">
             <Segmented size="sm" label="Language" value={language} onChange={setLanguage} options={LANGS} />
-            <Segmented size="sm" label="Customer" value={customer} onChange={setCustomer} options={config.policies.map((p) => ({ value: p.id, label: p.name }))} />
+            {config.policies.length > 1 ? <Segmented size="sm" label="Customer" value={customer} onChange={setCustomer} options={config.policies.map((p) => ({ value: p.id, label: p.name }))} /> : null}
           </div>
           <div className="flex flex-wrap gap-1.5">{USE_CASES.map((u) => <Chip key={u.value} active={u.value === useCase} onClick={() => setUseCase(u.value)}>{u.label}</Chip>)}</div>
           {error ? <ErrorNote error={error} /> : null}
@@ -153,7 +165,7 @@ function Preview({ config, models }: { config: RoutingConfig; models: ModelInfo[
         </div>
 
         <div className="flex flex-col gap-3">
-          <span className="label">Ranked candidates</span>
+          <span className="label">Ranked candidates{result ? ` · quality for ${language === 'es' ? 'Spanish' : 'English'} ${result.turn_type} turns` : ''}</span>
           <LayoutGroup>
             <ol className="flex flex-col gap-1.5">
               {ranked.map((c) => (
@@ -179,61 +191,11 @@ function Preview({ config, models }: { config: RoutingConfig; models: ModelInfo[
   );
 }
 
-// ---------- quality thresholds ----------
-function QualityScale({ config, models }: { config: RoutingConfig; models: ModelInfo[] }) {
-  const lo = 0.6;
-  const hi = 1;
-  const pos = (v: number) => `${((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * 100}%`;
-  const lines = [
-    { v: config.strategy.exclusionFloor, label: `Exclusion ${config.strategy.exclusionFloor.toFixed(2)}`, cls: 'bg-bad' },
-    { v: config.strategy.simpleQualityFloor, label: `Simple floor ${config.strategy.simpleQualityFloor.toFixed(2)}`, cls: 'bg-violet' },
-    ...config.policies.filter((p) => p.qualityFloor !== null).map((p) => ({ v: p.qualityFloor!, label: `${p.name} ${p.qualityFloor!.toFixed(2)}`, cls: 'bg-ember' })),
-    ...config.languages.filter((l) => l.qualityFloor !== null).map((l) => ({ v: l.qualityFloor!, label: `${l.language.toUpperCase()} ${l.qualityFloor!.toFixed(2)}`, cls: 'bg-ember' })),
-  ];
-  const sorted = [...models].sort((a, b) => (b.testScore ?? b.quality) - (a.testScore ?? a.quality));
-  return (
-    <Card
-      title="Quality thresholds"
-      subtitle="Each model's quality (latest test score, or the configured estimate before testing) against the floors that decide where it can serve."
-      right={<InfoTip content="Simple turns go to the cheapest model at or above the highest applicable floor (global, language or customer). Models under the exclusion floor are removed from routing until a later test run restores them." />}>
-      <div className="scroll-x">
-        <div className="min-w-[560px] pr-2">
-          <div className="relative mb-2 h-14">
-            {lines.map((l, i) => (
-              <div key={l.label} className="absolute bottom-0 flex flex-col items-center" style={{ left: pos(l.v), transform: 'translateX(-50%)' }}>
-                <span className="mb-1 whitespace-nowrap rounded-full bg-canvas px-2 py-0.5 text-[11px] font-medium text-ink-2 ring-1 ring-line" style={{ marginBottom: 4 + (i % 2) * 22 }}>{l.label}</span>
-              </div>
-            ))}
-          </div>
-          <div className="relative">
-            {lines.map((l) => <span key={l.label} className={`absolute top-0 bottom-0 w-px ${l.cls} opacity-60`} style={{ left: pos(l.v) }} aria-hidden="true" />)}
-            <div className="flex flex-col gap-2 py-1">
-              {sorted.map((m) => {
-                const q = m.testScore ?? m.quality;
-                return (
-                  <div key={m.id} className="relative h-8">
-                    <motion.div className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-full bg-canvas py-1 pr-2.5 pl-1 text-[12px] ring-1 ring-line" initial={{ left: '0%', opacity: 0 }} animate={{ left: pos(q), opacity: 1 }} transition={{ ...spring, delay: 0.05 }}>
-                      <Orb model={m} size={18} />
-                      <span className="font-medium">{m.name}</span>
-                      <span className="font-mono text-ink-3">{q.toFixed(2)}</span>
-                      {m.excluded ? <span className="text-bad">excluded</span> : null}
-                    </motion.div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <div className="mt-2 flex justify-between font-mono text-[11px] text-ink-3"><span>{lo.toFixed(2)}</span><span>0.80</span><span>{hi.toFixed(2)}</span></div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 // ---------- editors ----------
 function PolicyEditor({ initial, models, onSaved }: { initial: CustomerPolicy[]; models: ModelInfo[]; onSaved: () => void }) {
-  const [policies, setPolicies] = useState(initial);
-  const { save, saving, note } = useSaver<CustomerPolicy[]>('/routing/policies', (policies) => ({ policies }), onSaved);
+  const [policies, setPoliciesRaw] = useState(initial);
+  const { save, saving, note, markDirty } = useSaver<CustomerPolicy[]>('/routing/policies', (policies) => ({ policies }), onSaved);
+  const setPolicies = (v: CustomerPolicy[]) => { markDirty(); setPoliciesRaw(v); };
   const update = (id: string, patch: Partial<CustomerPolicy>) => setPolicies(policies.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   const toggleVendor = (p: CustomerPolicy, v: Vendor) => {
     const current = p.allowedVendors ?? VENDOR_ORDER;
@@ -284,10 +246,17 @@ function PolicyEditor({ initial, models, onSaved }: { initial: CustomerPolicy[];
 }
 
 function StrategyEditor({ initial, onSaved }: { initial: Strategy; onSaved: () => void }) {
-  const [s, setS] = useState(initial);
-  const [text, setText] = useState<Record<string, string>>(() => Object.fromEntries(NUM_FIELDS.map((f) => [f.key, String(initial[f.key])])));
-  const { save, saving, note } = useSaver<Strategy>('/routing/strategy', (v) => v, onSaved);
-  const commit = () => save({ ...s, ...Object.fromEntries(NUM_FIELDS.map((f) => [f.key, Number(text[f.key])])) } as Strategy);
+  const [s, setSRaw] = useState(initial);
+  const [text, setTextRaw] = useState<Record<string, string>>(() => Object.fromEntries(NUM_FIELDS.map((f) => [f.key, String(initial[f.key])])));
+  const { save, saving, note, markDirty, fail } = useSaver<Strategy>('/routing/strategy', (v) => v, onSaved);
+  const setS = (v: Strategy) => { markDirty(); setSRaw(v); };
+  const setText = (v: Record<string, string>) => { markDirty(); setTextRaw(v); };
+  // An empty or non-numeric box is an error, never a silent 0 (an empty latency budget used to save as 0 ms).
+  const commit = () => {
+    const bad = NUM_FIELDS.find((f) => !text[f.key]?.trim() || !Number.isFinite(Number(text[f.key])));
+    if (bad) return fail(`${bad.label} needs a number`);
+    save({ ...s, ...Object.fromEntries(NUM_FIELDS.map((f) => [f.key, Number(text[f.key])])) } as Strategy);
+  };
   return (
     <Card title="Strategy" right={<>{note}<Button size="sm" icon={Save} onClick={commit} loading={saving}>Save strategy</Button></>}>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -296,14 +265,16 @@ function StrategyEditor({ initial, onSaved }: { initial: Strategy; onSaved: () =
       <div className="mt-5 flex flex-col gap-3">
         <Toggle checked={s.sticky} onChange={(sticky) => setS({ ...s, sticky })} label="Sticky conversations" description="Keep a conversation on its first model while it stays allowed." />
         <Toggle checked={s.upgradeStickyOnComplex} onChange={(v) => setS({ ...s, upgradeStickyOnComplex: v })} label="Upgrade sticky calls on complex turns" description="An escalating call moves up to a stronger model." />
+        <Toggle checked={s.downgradeStickyOnSimple} onChange={(v) => setS({ ...s, downgradeStickyOnSimple: v })} label="Let simple follow-ups move to a cheaper model" description="A “thanks” or “yes” after a complex turn goes to the cheapest model above the floor instead of staying on the flagship." />
       </div>
     </Card>
   );
 }
 
 function LanguageEditor({ initial, onSaved }: { initial: LanguagePref[]; onSaved: () => void }) {
-  const [langs, setLangs] = useState(initial);
-  const { save, saving, note } = useSaver<LanguagePref[]>('/routing/languages', (languages) => ({ languages }), onSaved);
+  const [langs, setLangsRaw] = useState(initial);
+  const { save, saving, note, markDirty } = useSaver<LanguagePref[]>('/routing/languages', (languages) => ({ languages }), onSaved);
+  const setLangs = (v: LanguagePref[]) => { markDirty(); setLangsRaw(v); };
   const update = (l: Language, patch: Partial<LanguagePref>) => setLangs(langs.map((x) => (x.language === l ? { ...x, ...patch } : x)));
   const promote = (p: LanguagePref, v: Vendor) => {
     const i = p.vendorOrder.indexOf(v);
@@ -337,8 +308,9 @@ function LanguageEditor({ initial, onSaved }: { initial: LanguagePref[]; onSaved
 }
 
 function RulesEditor({ initial, onSaved }: { initial: ClassifierRule[]; onSaved: () => void }) {
-  const [rules, setRules] = useState(initial);
-  const { save, saving, note } = useSaver<ClassifierRule[]>('/routing/rules', (rules) => ({ rules }), onSaved);
+  const [rules, setRulesRaw] = useState(initial);
+  const { save, saving, note, markDirty } = useSaver<ClassifierRule[]>('/routing/rules', (rules) => ({ rules }), onSaved);
+  const setRules = (v: ClassifierRule[]) => { markDirty(); setRulesRaw(v); };
   const update = (id: string, patch: Partial<ClassifierRule>) => setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   return (
     <Card title="Classifier rules" subtitle="Weighted signals; their sum decides simple vs complex." right={<>{note}<Button size="sm" icon={Save} onClick={() => save(rules.map((r) => ({ ...r, phrases: r.phrases?.filter(Boolean) })))} loading={saving}>Save rules</Button></>}>
