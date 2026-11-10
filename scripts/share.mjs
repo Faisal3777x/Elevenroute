@@ -100,7 +100,9 @@ console.log('  Keep this window open. Ctrl+C stops sharing.\n');
 async function startTunnel() {
   const bin = await findCloudflared();
   console.log('Opening a public link with Cloudflare (no account needed)...');
-  const tunnel = spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://localhost:${PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  // HTTP/2 over TCP instead of the default QUIC (UDP): many home routers handle UDP badly, which made the link
+  // fail on and off and then die.
+  const tunnel = spawn(bin, ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://localhost:${PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
   procs.push(tunnel);
   tunnel.on('exit', (code) => console.error(`\nThe public link closed (cloudflared exited with ${code}). Local and network links still work.`));
   return new Promise((done) => {
