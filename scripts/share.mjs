@@ -73,7 +73,13 @@ const lan = Object.values(networkInterfaces())
   .map((a) => `http://${a.address}:${PORT}`);
 
 let publicUrl = null;
-if (isPublic) publicUrl = await startTunnel();
+let tunnel = null;
+if (isPublic) {
+  keepAwake();
+  publicUrl = await startTunnel();
+  saveLink(publicUrl);
+  watchTunnel();
+}
 
 const expoUp = await fetch('http://127.0.0.1:8081/status').then((r) => r.ok, () => false);
 const ips = lan.map((u) => new URL(u).hostname);
@@ -94,17 +100,81 @@ console.log('--------------------------------------------------------');
 console.log(signIn ? '  Sign-in: on (each person has their own workspace).' : '  Open access: no sign-in, everyone shares one workspace. Live mode is locked (demo only).');
 console.log('  Expo Go: scan the QR code in the Expo window, or open the exp:// link on the phone.');
 if (!publicUrl) console.log('  For teammates on other networks, run: npm run share:public');
-else console.log('  The public link changes each time you run share:public.');
+else console.log('  The public link changes each time you run share:public, and when it has to be repaired.\n  The current link is always in tools/public-link.txt. This computer stays awake while sharing.');
 console.log('  Keep this window open. Ctrl+C stops sharing.\n');
+
+/**
+ * Ask the OS not to sleep while sharing (the screen may still turn off). Sleep cuts the tunnel and a quick-tunnel
+ * link never comes back, which is what kept breaking the public link. The request ends when sharing stops.
+ */
+function keepAwake() {
+  let p = null;
+  if (process.platform === 'win32') {
+    const ps = "Add-Type -Name P -Namespace W -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f);'; [W.P]::SetThreadExecutionState(0x80000001) | Out-Null; while ($true) { Start-Sleep -Seconds 3600 }";
+    p = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore', windowsHide: true });
+  } else if (process.platform === 'darwin') {
+    p = spawn('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' });
+  }
+  if (p) {
+    p.on('error', () => {});
+    procs.push(p);
+  }
+}
+
+/** The current public link, in a file that is easy to find (tools/ is not committed). */
+function saveLink(url) {
+  if (!url) return;
+  try {
+    mkdirSync(join(root, 'tools'), { recursive: true });
+    writeFileSync(join(root, 'tools', 'public-link.txt'), `${url}\n`);
+  } catch {}
+}
+
+/**
+ * Every 30 s, check the public link from the outside. After 3 failures in a row (sleep, network change, Cloudflare
+ * dropping the quick tunnel), open a fresh tunnel and print the new link.
+ */
+function watchTunnel() {
+  let misses = 0;
+  let repairing = false;
+  setInterval(async () => {
+    if (repairing || !publicUrl) return;
+    const ok = await fetch(`${publicUrl}/health`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.ok, () => false);
+    misses = ok ? 0 : misses + 1;
+    if (misses < 3) return;
+    repairing = true;
+    console.log(`\nThe public link stopped answering (${publicUrl}). Opening a new one...`);
+    const url = await startTunnel();
+    if (url) {
+      publicUrl = url;
+      saveLink(url);
+      console.log('\n========================================================');
+      console.log(`  New public link:  ${url}`);
+      console.log('  (also saved in tools/public-link.txt)');
+      console.log('========================================================\n');
+    }
+    misses = 0;
+    repairing = false;
+  }, 30_000);
+}
 
 async function startTunnel() {
   const bin = await findCloudflared();
+  if (tunnel) {
+    const old = tunnel;
+    tunnel = null;
+    old.removeAllListeners('exit');
+    old.kill();
+    procs.splice(procs.indexOf(old), 1);
+  }
   console.log('Opening a public link with Cloudflare (no account needed)...');
   // HTTP/2 over TCP instead of the default QUIC (UDP): many home routers handle UDP badly, which made the link
   // fail on and off and then die.
-  const tunnel = spawn(bin, ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://localhost:${PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
-  procs.push(tunnel);
-  tunnel.on('exit', (code) => console.error(`\nThe public link closed (cloudflared exited with ${code}). Local and network links still work.`));
+  const t = spawn(bin, ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://localhost:${PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  tunnel = t;
+  procs.push(t);
+  // If cloudflared itself exits, the watchdog notices the dead link and opens a new one.
+  t.on('exit', (code) => console.error(`\nThe public link's tunnel stopped (cloudflared exited with ${code}); it will be reopened automatically.`));
   return new Promise((done) => {
     const timer = setTimeout(() => {
       console.error('No public link from Cloudflare after 45 seconds. Check your internet connection and try again.');
@@ -117,8 +187,8 @@ async function startTunnel() {
         done(m[0]);
       }
     };
-    tunnel.stdout.on('data', scan);
-    tunnel.stderr.on('data', scan);
+    t.stdout.on('data', scan);
+    t.stderr.on('data', scan);
   });
 }
 
