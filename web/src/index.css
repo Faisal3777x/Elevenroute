@@ -24,7 +24,17 @@
 
   --radius-card: 20px;
 
+  /* The UI curve (same as EASE in lib/motion.ts): a strong ease-out, so motion starts at once and settles softly.
+     Defining it here also makes Tailwind's `ease-out` utility use it. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* A springy ease with a touch of overshoot, for the sliding "active" pills: lively, settles fast. */
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+  --animate-spin: spin 0.75s linear infinite;
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
   @keyframes shimmer {
     0% { background-position: 100% 0; }
     100% { background-position: -100% 0; }
@@ -32,11 +42,23 @@
 }
 
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  /* No grey flash on tap: every control has its own press state instead. */
+  html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
   body {
     @apply bg-canvas text-ink font-sans antialiased;
     font-feature-settings: "cv11", "ss01";
     min-height: 100dvh;
+    /* The page runs under the notch (viewport-fit=cover); content keeps clear of it in landscape. */
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  /* Taps fire at once (no double-tap-zoom wait) on everything you press. */
+  button, a, [role="button"], [role="tab"], [role="radio"], [role="switch"] { touch-action: manipulation; }
+  /* A long press on a control shouldn't select its label or pop the link menu. Content text stays selectable. */
+  button, [role="button"], [role="tab"], [role="radio"], [role="switch"], nav a {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
   /* Gentle, static background depth: two very soft accent glows. */
   body::before {
@@ -58,7 +80,9 @@
 }
 
 @layer components {
-  .h-display { @apply font-light tracking-[-0.02em] text-ink; }
+  /* Display type: light weight, negative tracking. Tracking is size-specific (big type reads loose, so it tightens
+     as it grows): this default suits card titles and numbers; page titles and the landing headlines go tighter. */
+  .h-display { @apply font-light tracking-[-0.015em] text-ink; }
   .card { @apply bg-card rounded-[var(--radius-card)] shadow-[var(--shadow-card)]; }
   .label { @apply text-xs font-medium text-ink-2 tracking-[0.01em]; }
   .skeleton {
@@ -67,7 +91,152 @@
     @apply animate-shimmer rounded-xl;
   }
   .scroll-x { @apply overflow-x-auto overscroll-x-contain; scrollbar-width: thin; }
+
+  /* Hover elevation without animating box-shadow (that once dropped the page to 1 fps): the deeper shadow lives on a
+     pseudo-element and only its opacity changes. Pair with a transform lift (whileHover y) if the card should rise. */
+  /* Press feedback for plain buttons: a slight sink on press, released along the UI curve. Motion buttons (Button,
+     Chip) use whileTap instead; don't put both on one element. */
+  .press { transition: scale 160ms var(--ease-out); }
+  .press:active:not(:disabled) { scale: 0.97; }
+
+  /* A row that scrolls sideways fades out at its right edge, so a cut-off chip reads as "more this way". */
+  .fade-x { mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); }
 }
+
+/* ---- Entrances: opacity + translate only, so they run on the compositor ---- */
+@keyframes rise-in { from { opacity: 0; translate: 0 12px; } }
+@keyframes rise-in-lead { from { opacity: 0; translate: 0 22px; } }
+@keyframes fade-in { from { opacity: 0; } }
+
+/* Dashboard page (`Page`): its sections rise in as one quick wave, the gaps shrinking down the page. Anything that
+   mounts later (data replacing a skeleton, a notice) rises in the same way. A section marked `.cascade` hands the
+   entrance to its own children instead, card by card (one entrance per container). */
+.page-enter > * { animation: rise-in 480ms var(--ease-out) both; }
+.page-enter > :nth-child(2) { animation-delay: 50ms; }
+.page-enter > :nth-child(3) { animation-delay: 95ms; }
+.page-enter > :nth-child(4) { animation-delay: 135ms; }
+.page-enter > :nth-child(5) { animation-delay: 170ms; }
+.page-enter > :nth-child(6) { animation-delay: 200ms; }
+.page-enter > :nth-child(n + 7) { animation-delay: 225ms; }
+.page-enter > .cascade { animation: none; }
+.cascade > * { animation: rise-in 480ms var(--ease-out) both; animation-delay: var(--cascade-start, 80ms); }
+.cascade > :nth-child(2) { animation-delay: calc(var(--cascade-start, 80ms) + 45ms); }
+.cascade > :nth-child(3) { animation-delay: calc(var(--cascade-start, 80ms) + 85ms); }
+.cascade > :nth-child(4) { animation-delay: calc(var(--cascade-start, 80ms) + 120ms); }
+.cascade > :nth-child(5) { animation-delay: calc(var(--cascade-start, 80ms) + 150ms); }
+.cascade > :nth-child(6) { animation-delay: calc(var(--cascade-start, 80ms) + 175ms); }
+.cascade > :nth-child(7) { animation-delay: calc(var(--cascade-start, 80ms) + 195ms); }
+.cascade > :nth-child(n + 8) { animation-delay: calc(var(--cascade-start, 80ms) + 210ms); }
+
+/* Landing sections (`Reveal` in Landing.tsx) rise in once, as they scroll into view: the title leads and travels
+   furthest, the rest follow with shrinking gaps, fine print (`.fine`) only fades, and a `.reveal-cascade` inside
+   (the three reasons, the proof figures) flows in item by item after the title. Nothing is hidden under reduced
+   motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal:not([data-in]) > *, .reveal:not([data-in]) .reveal-cascade > * { opacity: 0; }
+}
+.reveal[data-in] > * { animation: rise-in 650ms var(--ease-out) both; }
+.reveal[data-in] > :first-child { animation-name: rise-in-lead; }
+.reveal[data-in] > :nth-child(2) { animation-delay: 110ms; }
+.reveal[data-in] > :nth-child(3) { animation-delay: 200ms; }
+.reveal[data-in] > :nth-child(n + 4) { animation-delay: 270ms; }
+.reveal[data-in] > .fine { animation-name: fade-in; }
+.reveal[data-in] > .reveal-cascade { animation: none; }
+.reveal[data-in] .reveal-cascade > * { animation: rise-in 650ms var(--ease-out) both; animation-delay: 120ms; }
+.reveal[data-in] .reveal-cascade > :nth-child(2) { animation-delay: 220ms; }
+.reveal[data-in] .reveal-cascade > :nth-child(3) { animation-delay: 300ms; }
+.reveal[data-in] .reveal-cascade > :nth-child(n + 4) { animation-delay: 360ms; }
+
+/* Ambient light on the landing page: the soft glows drift and breathe very slowly (decoration, compositor-only;
+   stopped under reduced motion). Each glow gets its own period and phase inline, so they never move in step. */
+.glow-drift { animation: glow-drift var(--glow-period, 22s) cubic-bezier(0.37, 0, 0.63, 1) var(--glow-delay, 0s) infinite; }
+@keyframes glow-drift {
+  0%, 100% { translate: 0 0; scale: 1; }
+  33% { translate: -4% 3%; scale: 1.06; }
+  66% { translate: 3% -2%; scale: 0.96; }
+}
+
+/* An icon that pops in a beat after its row arrives (the landing's three reasons): a springy settle, from 60%. */
+@keyframes icon-pop { from { opacity: 0; scale: 0.6; rotate: -14deg; } }
+.reveal[data-in] .icon-pop { animation: icon-pop 700ms var(--ease-spring) both; }
+
+/* A soft light that follows the mouse across a tile (useSpotlight): the dashboard's cards feel alive without
+   pretending to be buttons. --mx/--my don't inherit, so moving the light restyles only this card's own layer. */
+@property --mx { syntax: "<length-percentage>"; inherits: false; initial-value: 50%; }
+@property --my { syntax: "<length-percentage>"; inherits: false; initial-value: 50%; }
+.spotlight { position: relative; isolation: isolate; }
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(280px circle at var(--mx) var(--my), rgb(4 71 255 / 0.08), rgb(255 71 4 / 0.03) 45%, transparent 70%);
+  opacity: 0;
+  transition: opacity 350ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight:hover::before { opacity: 1; }
+}
+
+/* ---- Living orbs (components/Orb.tsx) ----
+   The loops are CSS keyframes, so they run on the compositor instead of as JavaScript every frame (as anime.js loops
+   they were the largest steady main-thread cost on pages with many orbs). Each orb sets its own timing through
+   inline custom properties, so neighbours never move in step. Drift is split over two nested elements because x and
+   y run on different periods and both use `translate`; breathing uses `scale` and spinning `rotate`, which combine
+   with it. Off-screen orbs pause (data-orb-paused), and the reduced-motion rule at the end stops them all. */
+/* Each drift is one there-and-back cycle per iteration (not `alternate`): measured, every iteration boundary costs a
+   style recalculation, so whole cycles halve them. Distances are percentages of the orb's own size (no var() in the
+   keyframes, which measured costlier), so a bigger orb drifts further. The --orb-* durations are half cycles. */
+.orb-dy { animation: orb-dy calc(var(--orb-dy, 2s) * 2) linear var(--orb-dy-delay, 0s) infinite; }
+.orb-dx {
+  animation:
+    orb-dx calc(var(--orb-dx, 3s) * 2) linear var(--orb-dx-delay, 0s) infinite,
+    orb-breathe calc(var(--orb-db, 2.2s) * 2) linear var(--orb-db-delay, 0s) infinite;
+}
+.orb-spin { animation: orb-spin var(--orb-spin, 8s) linear infinite; }
+.orb-spin-rev { animation: orb-spin var(--orb-spin, 9s) linear infinite reverse; }
+.orb-ping { animation: orb-ping var(--orb-ping, 2.4s) cubic-bezier(0.5, 1, 0.89, 1) var(--orb-ping-delay, 0s) infinite; }
+.orb-beat { animation: orb-beat 1.25s infinite; }
+.orb-beat-ping { animation: orb-beat-ping 1.25s cubic-bezier(0.5, 1, 0.89, 1) infinite; }
+[data-orb-paused], [data-orb-paused] * { animation-play-state: paused !important; }
+
+@keyframes orb-dy {
+  0%, 100% { translate: 0 3.6%; animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); }
+  50% { translate: 0 -9%; animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); }
+}
+@keyframes orb-dx {
+  0%, 100% { translate: -4% 0; animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); }
+  50% { translate: 4% 0; animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); }
+}
+@keyframes orb-breathe {
+  0%, 100% { scale: 0.97; animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); }
+  50% { scale: 1.04; animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); }
+}
+@keyframes orb-spin { to { rotate: 360deg; } }
+@keyframes orb-ping { from { scale: 1; opacity: 0.45; } to { scale: 1.75; opacity: 0; } }
+/* Lub-dub, then rest: about 50 beats a minute (1.25 s per beat). */
+@keyframes orb-beat {
+  0% { scale: 1; animation-timing-function: cubic-bezier(0.5, 1, 0.89, 1); }
+  11.2% { scale: 1.075; animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); }
+  21.6% { scale: 0.985; animation-timing-function: cubic-bezier(0.5, 1, 0.89, 1); }
+  32% { scale: 1.045; animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); }
+  59.2%, 100% { scale: 1; }
+}
+@keyframes orb-beat-ping { from { scale: 1; opacity: 0.45; } to { scale: 1.6; opacity: 0; } }
+
+/* The landing hero orb rises and dims as the page scrolls past it. Driven by the scroll position on the compositor
+   (scroll-driven animations) where supported; elsewhere it simply stays put. Off under reduced motion. */
+@supports (animation-timeline: scroll()) {
+  .hero-orb-scroll {
+    animation: hero-orb-scroll linear both;
+    animation-timeline: scroll(root block);
+    animation-range: 0 560px;
+  }
+}
+@keyframes hero-orb-scroll { to { translate: 0 -70px; opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .hero-orb-scroll { animation: none !important; } }
 
 /* Black theme, used by the landing page only: the same tokens, redefined for a dark canvas.
    Everything inside .theme-dark that uses bg-canvas, text-ink, border-line… follows automatically. */
@@ -95,6 +264,9 @@
 }
 /* While the landing page is open, the page behind it (overscroll, body glows) is black too. */
 html.landing-dark, html.landing-dark body { background-color: #09090a; }
+/* In-page links on the landing page glide to their section, so the reader sees where it sits. Landing only: the
+   dashboard's jump to the top of a new page must stay instant. Reduced motion: instant (rule at the end). */
+html.landing-dark { scroll-behavior: smooth; }
 html.landing-dark body::before { display: none; }
 /* 4K: the landing page is sized in rem, so a larger root size scales the whole page evenly on very wide
    screens instead of leaving a small column in the middle. Keep in step with scaleFor() in Landing.tsx. */
@@ -102,11 +274,33 @@ html.landing-dark body::before { display: none; }
 @media (min-width: 2560px) { html.landing-dark { font-size: 26px; } }
 @media (min-width: 3400px) { html.landing-dark { font-size: 34px; } }
 
+/* "Reduce transparency": the frosted landing header becomes solid. */
+@media (prefers-reduced-transparency: reduce) {
+  .landing-bar { background-color: var(--color-canvas) !important; backdrop-filter: none !important; }
+}
+/* "Increase contrast": hairlines and tertiary text get darker (lighter on the black landing page). */
+@media (prefers-contrast: more) {
+  :root { --color-line: #b9b2aa; --color-ink-3: #4a4541; }
+  .theme-dark { --color-line: #57525a; --color-ink-3: #c9c3bd; }
+}
+
+/* iOS zooms into any input under 16 px and doesn't zoom back out, so on touch screens inputs are 16 px. Unlayered,
+   so it wins over the text-[15px] utility the inputs use on desktop. */
+@media (pointer: coarse) {
+  input, textarea, select { font-size: 16px; }
+}
+
+/* Reduced motion means less movement, not no feedback: loops and keyframes stop, and transitions keep only the
+   properties that don't move anything (colour and opacity still fade, so state changes stay readable). A loading
+   spinner keeps turning, so "working" never looks frozen. Motion components follow MotionConfig in App.tsx. */
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity !important;
     scroll-behavior: auto !important;
   }
+  .animate-spin { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
+  /* Entrances happen at once, with no waiting on delays. */
+  .page-enter > *, .cascade > *, .reveal > *, .reveal .reveal-cascade > *, .icon-pop { animation-delay: 0s !important; }
 }

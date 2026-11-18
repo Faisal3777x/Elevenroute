@@ -16,6 +16,8 @@ export interface TurnOptions {
   synthetic?: boolean;
   /** false: don't log. An array: collect the row for a batched insert (synthetic traffic). Default: insert now. */
   log?: boolean | unknown[][];
+  /** ElevenAgent: the reply the simulated provider gives, and the context tokens sent with the turn. */
+  script?: { reply: string; contextTokens: number };
 }
 
 export const TURN_COLUMNS = [
@@ -58,7 +60,7 @@ export async function runTurn(ws: Workspace, req: ChatRequest, opts: TurnOptions
     const model = queue.splice(Math.max(idx, 0), 1)[0];
     try {
       const res = await callModel(
-        { model, message: req.message, useCase: req.use_case, language: req.language, turnType, budgetMs, vendorState: vendorStates[model.vendor], simulated, virtual: opts.virtual ?? false },
+        { model, message: req.message, useCase: req.use_case, language: req.language, turnType, budgetMs, vendorState: vendorStates[model.vendor], simulated, virtual: opts.virtual ?? false, script: opts.script },
         simulated ? 'demo' : 'live',
       );
       attempts.push({ modelId: model.id, ok: true, latencyMs: res.latencyMs });
@@ -103,6 +105,8 @@ export async function runTurn(ws: Workspace, req: ChatRequest, opts: TurnOptions
     provider: served?.model.vendor ?? null,
     latency_ms: Math.round(latencyMs),
     cost_usd: cost,
+    tokens_in: served?.tokensIn ?? 0,
+    tokens_out: served?.tokensOut ?? 0,
     route_reason: reason,
     failover_used: failed.length > 0,
     turn_type: turnType,

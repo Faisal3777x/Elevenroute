@@ -6,7 +6,7 @@ import { flushSync } from 'react-dom';
 
 import type { Candidate, Language, ModelInfo, RouteTrace, TurnType } from '../../../shared/types';
 import { useOnScreen } from '../lib/anime';
-import { money, ms } from '../lib/format';
+import { LANGS, money, ms } from '../lib/format';
 import { base, fast } from '../lib/motion';
 import { BAD, sortModels, VENDOR_SHORT, VIOLET } from '../lib/theme';
 import { BrandOrb, Orb } from './Orb';
@@ -296,7 +296,7 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
 
   const summary = run.kind === 'chat'
     ? `${run.turnType} turn routed to ${models.find((m) => m.id === run.modelUsed)?.name ?? 'a human handoff'}${run.failover ? ' after a failover' : ''}.`
-    : `Dry run: ${run.turnType} turn would route to ${cand(plannedId ?? '')?.name ?? 'no eligible model'}.`;
+    : `Preview: ${run.turnType} turn would route to ${cand(plannedId ?? '')?.name ?? 'no eligible model'}.`;
 
   return (
     <div ref={screenRef} className="flex flex-col gap-4">
@@ -359,7 +359,7 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
             <Node x={L.user.x} y={L.user.y} w={L.horizontal ? 160 : Math.min(280, L.w - 32)}>
               <div className={`rounded-2xl border bg-canvas px-3 py-2.5 shadow-[var(--shadow-card)] transition-colors ${at('response') ? 'border-ok/40' : 'border-line'}`}>
                 <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-ink-3 uppercase">
-                  <User size={12} aria-hidden="true" /> Customer · {run.language.toUpperCase()}
+                  <User size={12} aria-hidden="true" /> Customer{LANGS.length > 1 ? ` · ${run.language.toUpperCase()}` : ''}
                 </div>
                 <p className="mt-1 line-clamp-2 text-[12.5px] leading-snug text-ink">“{run.message}”</p>
                 <AnimatePresence>
@@ -396,7 +396,7 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
                   {at('checks') && (
                     <motion.ul key="chk" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={base} className="mt-2 space-y-0.5 text-[11.5px] text-white/80">
                       <li>✓ Policy: {run.customer}</li>
-                      <li>✓ Language: {run.language.toUpperCase()} · floor ≥ {run.trace.qualityFloor.toFixed(2)}</li>
+                      <li>✓ {LANGS.length > 1 ? `Language: ${run.language.toUpperCase()} · floor` : 'Quality floor'} ≥ {run.trace.qualityFloor.toFixed(2)}</li>
                       <li>✓ {eligibleCount} of {run.trace.candidates.length} models eligible{run.trace.sticky ? ' · sticky' : ''}</li>
                     </motion.ul>
                   )}
@@ -422,18 +422,18 @@ export function RoutingVisualiser({ run, models, autoPlay = true, placeholder }:
             <button
               type="button"
               onClick={() => setPlaying(!playing)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-canvas px-3.5 text-[13px] font-medium hover:border-ink/25">
+              className="press inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-canvas px-3.5 text-[13px] font-medium transition-colors hover:border-ink/25">
               {playing ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
               {playing ? 'Pause' : 'Play'}
             </button>
             <div className="h-1.5 min-w-[120px] flex-1 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuemin={0} aria-valuemax={last} aria-valuenow={idx} aria-label="Routing animation progress">
-              <motion.div className="h-full rounded-full bg-ink" animate={{ width: `${last ? (idx / last) * 100 : 100}%` }} transition={base} />
+              <motion.div className="h-full origin-left rounded-full bg-ink" initial={false} animate={{ scaleX: last ? idx / last : 1 }} transition={base} />
             </div>
           </>
         )}
       </div>
 
-      <TracePanel label={run.kind === 'chat' ? 'Real routing trace' : 'Dry run: decision only, no model call'} count={run.trace.attempts.length}>
+      <TracePanel label={run.kind === 'chat' ? 'Real routing trace' : 'Preview: decision only, no model call'} count={run.trace.attempts.length}>
         <StepLog run={run} steps={steps} idx={idx} models={models} />
       </TracePanel>
     </div>
@@ -477,18 +477,18 @@ function ModelNode({ x, y, w, model, cand, state, attempt, reduce, compact }: {
           className="absolute inset-0 rounded-2xl border-2 border-violet"
           initial={{ opacity: 0.6, scale: 1 }}
           animate={{ opacity: 0, scale: 1.12 }}
-          transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 0.4, ease: 'easeOut' }}
+          transition={{ duration: 1.1, repeat: 1, repeatDelay: 0.3, ease: 'easeOut' }}
         />
       )}
-      <div className={`relative flex items-center gap-2 rounded-2xl border bg-canvas px-2.5 ${compact ? 'py-1.5' : 'py-2'} transition-[border-color,box-shadow,opacity] duration-300 ${styles[state]}`}>
+      <div className={`relative flex items-center gap-2 rounded-2xl border bg-canvas px-2.5 ${compact ? 'py-1.5' : 'py-2'} transition-[border-color,opacity] duration-300 ${styles[state]}`}>
         <Orb model={model} size={compact ? 20 : 24} />
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="truncate text-[12.5px] font-medium text-ink">{model.name}</div>
+          <div className="truncate text-[12.5px] font-medium text-ink" title={model.name}>{model.name}</div>
           <div className="truncate text-[11px]">{sub}</div>
         </div>
         <AnimatePresence>
           {(state === 'failed' || state === 'selected') && (
-            <motion.span initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={fast} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${state === 'failed' ? 'bg-bad text-white' : 'bg-ink text-white'}`}>
+            <motion.span initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={fast} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${state === 'failed' ? 'bg-bad text-white' : 'bg-ink text-white'}`}>
               {state === 'failed' ? <X size={12} aria-hidden="true" /> : <Check size={12} aria-hidden="true" />}
             </motion.span>
           )}
@@ -544,17 +544,17 @@ function TracePanel({ label, count, children }: { label: string; count: number; 
         <div data-trace-content id={panelId} className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-[13.5px] font-medium text-ink">
-              <BrandOrb size={18} live={!reduce} drift={false} />
+              <BrandOrb size={18} live drift={false} />
               {label}
             </div>
-            <button type="button" onClick={toggle} aria-expanded="true" aria-controls={panelId} className="inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium text-ink-2 hover:bg-card hover:text-ink">
+            <button type="button" onClick={toggle} aria-expanded="true" aria-controls={panelId} className="press inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-card hover:text-ink">
               <X size={14} aria-hidden="true" /> Close
             </button>
           </div>
           {children}
         </div>
       ) : (
-        <button type="button" data-trace-content onClick={toggle} aria-expanded="false" className="inline-flex h-9 items-center gap-2 px-3.5 text-[13px] font-medium text-ink">
+        <button type="button" data-trace-content onClick={toggle} aria-expanded="false" className="press inline-flex h-9 items-center gap-2 px-3.5 text-[13px] font-medium text-ink">
           <ListTree size={14} aria-hidden="true" />
           {label}
           {count > 0 ? <span className="rounded-full bg-card px-2 py-0.5 text-[11.5px] text-ink-2">{count} model call{count === 1 ? '' : 's'}</span> : null}
@@ -573,7 +573,7 @@ function StepLog({ run, steps, idx, models }: { run: RouteRun; steps: Step[]; id
   const items: { key: string; title: ReactNode; body?: ReactNode; tone?: 'bad' | 'ok' }[] = [];
 
   steps.slice(0, idx + 1).forEach((s, n) => {
-    if (s.k === 'request') items.push({ key: `${n}`, title: 'Request received', body: `${run.customer} · ${run.language === 'en' ? 'English' : 'Spanish'}` });
+    if (s.k === 'request') items.push({ key: `${n}`, title: 'Request received', body: `${run.customer} · English` });
     if (s.k === 'classify')
       items.push({
         key: `${n}`,
@@ -584,13 +584,13 @@ function StepLog({ run, steps, idx, models }: { run: RouteRun; steps: Step[]; id
       const filtered = run.trace.candidates.filter((x) => !x.eligible);
       items.push({
         key: `${n}`,
-        title: `Policy, language and quality checks: ${run.trace.candidates.length - filtered.length} of ${run.trace.candidates.length} models eligible`,
+        title: `Policy, language and quality checks: ${run.trace.candidates.length - filtered.length} of ${run.trace.candidates.length} models eligible`.replace(/ of 1 models /, ' of 1 model '),
         body: `${run.trace.policy} · quality floor ≥ ${run.trace.qualityFloor.toFixed(2)}${filtered.length ? ` · filtered: ${filtered.map((f) => `${f.name} (${f.note})`).join(', ')}` : ''}`,
       });
     }
     if (s.k === 'try' && s.i === -1) {
       const p = planned(run);
-      items.push({ key: `${n}`, title: `Ranked #1: ${p?.name}`, body: 'Dry run: the router did not call the model.' });
+      items.push({ key: `${n}`, title: `Ranked #1: ${p?.name}`, body: 'Preview only: the router did not call the model.' });
     }
     if (s.k === 'result') {
       const a = run.trace.attempts[s.i];

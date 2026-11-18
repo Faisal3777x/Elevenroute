@@ -1,22 +1,23 @@
-import { Calculator, FlaskConical, LayoutDashboard, LogOut, MessagesSquare, Server, SlidersHorizontal, type LucideIcon } from 'lucide-react';
-import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Bot, Calculator, FlaskConical, LayoutDashboard, LogOut, MessagesSquare, Server, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { MotionConfig } from 'motion/react';
+import { lazy, Suspense, useEffect, useLayoutEffect, type ReactNode } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router';
 
 import type { MeResponse } from '../../shared/types';
-import { Modal } from './components/Modal';
 import { BrandOrb } from './components/Orb';
-import { Button, Segmented, Skeleton } from './components/ui';
+import { Skeleton } from './components/ui';
 import { useAuth } from './lib/auth';
 import { ModeProvider, useMode } from './lib/mode';
-import { page, spring } from './lib/motion';
+import { useIndicator } from './lib/indicator';
 import { useApi } from './lib/useApi';
 
 const SignIn = lazy(() => import('./pages/SignIn'));
 const Landing = lazy(() => import('./pages/Landing'));
+const AdFilm = lazy(() => import('./pages/AdFilm'));
 
 const Overview = lazy(() => import('./pages/Overview'));
 const Playground = lazy(() => import('./pages/Playground'));
+const Agent = lazy(() => import('./pages/Agent'));
 const RoutingRules = lazy(() => import('./pages/RoutingRules'));
 const Providers = lazy(() => import('./pages/Providers'));
 const TestResults = lazy(() => import('./pages/TestResults'));
@@ -25,6 +26,7 @@ const WhatIf = lazy(() => import('./pages/WhatIf'));
 const NAV: { to: string; label: string; short: string; icon: LucideIcon }[] = [
   { to: '/overview', label: 'Overview', short: 'Overview', icon: LayoutDashboard },
   { to: '/playground', label: 'Playground', short: 'Playground', icon: MessagesSquare },
+  { to: '/agent', label: 'ElevenAgent', short: 'Agent', icon: Bot },
   { to: '/rules', label: 'Routing rules', short: 'Rules', icon: SlidersHorizontal },
   { to: '/providers', label: 'Providers', short: 'Providers', icon: Server },
   { to: '/tests', label: 'Test results', short: 'Tests', icon: FlaskConical },
@@ -41,6 +43,15 @@ export function App() {
           element={
             <Suspense fallback={<div className="min-h-dvh" aria-busy="true" />}>
               <Landing />
+            </Suspense>
+          }
+        />
+        {/* The ad film: plays live here; /ad?render lets a recorder capture it frame by frame (README: "Ad film"). */}
+        <Route
+          path="/ad"
+          element={
+            <Suspense fallback={<div className="min-h-dvh bg-black" aria-busy="true" />}>
+              <AdFilm />
             </Suspense>
           }
         />
@@ -76,10 +87,8 @@ function AuthGate({ children }: { children: ReactNode }) {
 
 function Account({ compact = false }: { compact?: boolean }) {
   const { enabled, user, signOut } = useAuth();
-  const me = useApi<MeResponse>('/me');
-  if (!enabled) {
-    return compact ? null : <p className="px-1 pb-3 text-[12px] leading-relaxed text-ink-3">Open access: no sign-in. Everyone using this server shares one workspace.</p>;
-  }
+  const me = useApi<MeResponse>(enabled ? '/me' : null);
+  if (!enabled) return null;
   const email = user?.email ?? 'Signed in';
   if (compact) {
     return (
@@ -106,8 +115,12 @@ function Account({ compact = false }: { compact?: boolean }) {
 
 function Shell() {
   const location = useLocation();
+  // A new page starts at the top, set before the browser paints it, so the old scroll position never flashes.
+  useLayoutEffect(() => {
+    // Instant even when arriving from the landing page, whose smooth scrolling is still switched on at this moment.
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [location.pathname]);
   useEffect(() => {
-    window.scrollTo({ top: 0 });
     const current = NAV.find((n) => n.to === location.pathname);
     document.title = current ? `${current.label} · ElevenRoute` : 'ElevenRoute';
   }, [location.pathname]);
@@ -119,49 +132,45 @@ function Shell() {
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[252px] flex-col border-r border-line bg-canvas px-4 py-7 lg:flex">
         <Brand />
-        <nav aria-label="Main" className="mt-8 flex flex-col gap-0.5">
-          {NAV.map((n) => <SideLink key={n.to} {...n} />)}
-        </nav>
+        <SideNav pathname={location.pathname} />
         <div className="mt-auto">
           <Account />
-          <ModeSwitch />
+          <DataNote />
         </div>
       </aside>
 
       {/* Mobile / tablet top bar */}
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-line bg-canvas/85 px-4 py-3 backdrop-blur lg:hidden">
+      {/* Nearly opaque instead of frosted: a backdrop blur here would re-blur the moving page on every scroll frame. */}
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-line bg-canvas/[0.97] px-4 py-3 lg:hidden">
         <Brand />
-        <div className="flex items-center gap-2">
-          <ModePill />
-          <Account compact />
-        </div>
+        <Account compact />
       </header>
 
-      <ModeBanner />
+      <LiveBanner />
 
-      <main id="main" className="px-4 pt-6 pb-32 sm:px-6 lg:px-10 lg:pt-10 lg:pb-16">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div key={location.pathname} variants={page} initial="initial" animate="enter" exit="exit">
-            <Suspense fallback={<PageSkeleton />}>
-              <Routes location={location}>
-                <Route path="/overview" element={<Overview />} />
-                <Route path="/playground" element={<Playground />} />
-                <Route path="/rules" element={<RoutingRules />} />
-                <Route path="/providers" element={<Providers />} />
-                <Route path="/tests" element={<TestResults />} />
-                <Route path="/whatif" element={<WhatIf />} />
-                <Route path="*" element={<Overview />} />
-              </Routes>
-            </Suspense>
-          </motion.div>
-        </AnimatePresence>
+      <main id="main" className="px-4 pt-6 pb-[calc(8rem+env(safe-area-inset-bottom,0px))] sm:px-6 lg:px-10 lg:pt-10 lg:pb-16">
+        {/* Pages swap at once, with no transition: it's the click people make most often here. */}
+        <Suspense fallback={<PageSkeleton />}>
+          <Routes location={location}>
+            <Route path="/overview" element={<Overview />} />
+            <Route path="/playground" element={<Playground />} />
+            <Route path="/agent" element={<Agent />} />
+            <Route path="/rules" element={<RoutingRules />} />
+            <Route path="/providers" element={<Providers />} />
+            <Route path="/tests" element={<TestResults />} />
+            <Route path="/whatif" element={<WhatIf />} />
+            <Route path="*" element={<Overview />} />
+          </Routes>
+        </Suspense>
+        {/* Phones and tablets have no sidebar, so the data note closes every page instead. */}
+        <div className="mx-auto mt-10 max-w-[1200px] lg:hidden">
+          <DataNote />
+        </div>
       </main>
 
       {/* Mobile / tablet floating pill navigation */}
-      <nav aria-label="Main" className="fixed inset-x-0 bottom-4 z-40 flex justify-center px-3 lg:hidden">
-        <div className="scroll-x flex max-w-full gap-0.5 rounded-full border border-line bg-canvas/95 p-1.5 shadow-[var(--shadow-float)] backdrop-blur">
-          {NAV.map((n) => <PillLink key={n.to} {...n} />)}
-        </div>
+      <nav aria-label="Main" className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-40 flex justify-center px-3 lg:hidden">
+        <PillNav pathname={location.pathname} />
       </nav>
     </div>
   );
@@ -176,14 +185,34 @@ function Brand() {
   );
 }
 
+/** The active page's pill slides to the new page on the compositor (useIndicator), with a springy settle. */
+function SideNav({ pathname }: { pathname: string }) {
+  const [list, pill] = useIndicator<HTMLElement>('[aria-current="page"]', [pathname], 280);
+  return (
+    <nav ref={list} aria-label="Main" className="relative mt-8 flex flex-col gap-0.5">
+      <span aria-hidden="true" className="pointer-events-none absolute top-0 left-0 rounded-full bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04)]" style={pill} />
+      {NAV.map((n) => <SideLink key={n.to} {...n} />)}
+    </nav>
+  );
+}
+
+function PillNav({ pathname }: { pathname: string }) {
+  const [list, pill] = useIndicator<HTMLDivElement>('[aria-current="page"]', [pathname], 280);
+  return (
+    <div ref={list} className="scroll-x relative flex max-w-full [scrollbar-width:none] gap-0.5 rounded-full border border-line bg-canvas/[0.97] p-1.5 shadow-[var(--shadow-float)]">
+      <span aria-hidden="true" className="pointer-events-none absolute top-0 left-0 rounded-full bg-ink" style={pill} />
+      {NAV.map((n) => <PillLink key={n.to} {...n} />)}
+    </div>
+  );
+}
+
 function SideLink({ to, label, icon: Icon }: { to: string; label: string; icon: LucideIcon }) {
   return (
-    <NavLink to={to} end className="group relative flex items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] font-medium">
+    <NavLink to={to} end className="press group relative flex items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] font-medium">
       {({ isActive }) => (
         <>
-          {isActive && <motion.span layoutId="side-active" transition={spring} className="absolute inset-0 rounded-full bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04)]" />}
-          <Icon size={17} aria-hidden="true" className={`relative ${isActive ? 'text-ink' : 'text-ink-3 group-hover:text-ink'}`} />
-          <span className={`relative ${isActive ? 'text-ink' : 'text-ink-2 group-hover:text-ink'}`}>{label}</span>
+          <Icon size={17} aria-hidden="true" className={`relative transition-[color,translate] duration-200 group-hover:-translate-y-px ${isActive ? 'text-ink' : 'text-ink-3 group-hover:text-ink'}`} />
+          <span className={`relative transition-colors duration-200 ${isActive ? 'text-ink' : 'text-ink-2 group-hover:text-ink'}`}>{label}</span>
         </>
       )}
     </NavLink>
@@ -192,114 +221,51 @@ function SideLink({ to, label, icon: Icon }: { to: string; label: string; icon: 
 
 function PillLink({ to, short, icon: Icon }: { to: string; short: string; icon: LucideIcon }) {
   return (
-    <NavLink to={to} end className="relative flex min-w-[64px] shrink-0 flex-col items-center gap-0.5 rounded-full px-3 py-1.5 text-[11.5px] font-medium">
+    <NavLink to={to} end className="press relative flex min-w-[64px] shrink-0 flex-col items-center gap-0.5 rounded-full px-3 py-1.5 text-[11.5px] font-medium">
       {({ isActive }) => (
         <>
-          {isActive && <motion.span layoutId="pill-active" transition={spring} className="absolute inset-0 rounded-full bg-ink" />}
-          <Icon size={17} aria-hidden="true" className={`relative ${isActive ? 'text-white' : 'text-ink-2'}`} />
-          <span className={`relative ${isActive ? 'text-white' : 'text-ink-2'}`}>{short}</span>
+          <Icon size={17} aria-hidden="true" className={`relative transition-colors duration-200 ${isActive ? 'text-white' : 'text-ink-2'}`} />
+          <span className={`relative transition-colors duration-200 ${isActive ? 'text-white' : 'text-ink-2'}`}>{short}</span>
         </>
       )}
     </NavLink>
   );
 }
 
-/** Persistent strip so demo numbers are never mistaken for live measurements. */
-function ModeBanner() {
+/**
+ * A strip across the top only when it matters: the API can't be reached, or the workspace is calling real models
+ * (every request costs money). With sample data the quiet DataNote says so instead.
+ */
+function LiveBanner() {
   const { config, error } = useMode();
   if (error && !config) {
     return <div role="status" className="border-b border-bad/20 bg-bad/[0.05] px-4 py-2 text-center text-[12.5px] text-bad sm:px-6 lg:px-10">{error}</div>;
   }
-  if (!config) {
-    return (
-      <div aria-hidden="true" className="invisible flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b border-line px-4 py-2 text-center text-[12.5px] sm:px-6 lg:px-10">
-        <span className="inline-block h-2 w-2" />
-        <strong className="font-medium">Demo mode</strong>
-        <span>Simulated providers. Costs, latencies and scores are simulated, not live measurements.</span>
-      </div>
-    );
-  }
-  const demo = config.mode === 'demo';
+  if (config?.mode !== 'live') return null;
   return (
-    <div role="status" className={`flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b px-4 py-2 text-center text-[12.5px] sm:px-6 lg:px-10 ${demo ? 'border-line bg-card/70 text-ink-2' : 'border-ember/25 bg-ember/[0.06] text-ink'}`}>
-      <span className={`inline-block h-2 w-2 rounded-full ${demo ? 'bg-ink-3' : 'bg-ember'}`} aria-hidden="true" />
-      <strong className="font-medium">{demo ? 'Demo mode' : 'Live mode'}</strong>
-      <span>{demo ? 'Simulated providers. Costs, latencies and scores are simulated, not live measurements.' : 'Real provider calls. Requests you send cost real money.'}</span>
+    <div role="status" className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b border-ember/25 bg-ember/[0.06] px-4 py-2 text-center text-[12.5px] text-ink sm:px-6 lg:px-10">
+      <span className="inline-block h-2 w-2 rounded-full bg-ember" aria-hidden="true" />
+      <strong className="font-medium">Live models</strong>
+      <span>Real provider calls. Requests you send cost real money.</span>
     </div>
   );
 }
 
-function ModePill() {
+/**
+ * The one note that says where the numbers come from. Prices, scores, latencies and savings are simulated, so this
+ * stays visible on every dashboard page (in the sidebar, or at the foot of the page on phones). Never remove it while
+ * the workspace uses simulated providers.
+ */
+function DataNote() {
   const { config } = useMode();
-  if (!config) return null;
-  const demo = config.mode === 'demo';
+  if (!config || config.mode === 'live') return null;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium ${demo ? 'border-line text-ink-2' : 'border-ember/40 text-ink'}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${demo ? 'bg-ink-3' : 'bg-ember'}`} aria-hidden="true" />
-      {demo ? 'Demo' : 'Live'}
-    </span>
-  );
-}
-
-function ModeSwitch() {
-  const { config, setMode } = useMode();
-  const { enabled } = useAuth();
-  const [confirm, setConfirm] = useState(false);
-  const [busy, setBusy] = useState(false);
-  if (!config) return <Skeleton className="h-24" />;
-  const keys = Object.entries(config.keys).filter(([, v]) => v).map(([k]) => k);
-  const change = async (mode: 'demo' | 'live') => {
-    if (mode === 'live') return setConfirm(true);
-    setBusy(true);
-    await setMode('demo').finally(() => setBusy(false));
-  };
-  return (
-    <div className="card p-4">
-      <div className="label mb-2">Mode</div>
-      <Segmented label="Mode" size="sm" value={config.mode} onChange={change} options={[{ value: 'demo', label: 'Demo' }, { value: 'live', label: 'Live' }]} />
-      <p className="mt-2 text-[12px] leading-relaxed text-ink-3">
-        {config.mode === 'demo'
-          ? config.liveAllowed === false
-            ? enabled
-              ? 'Simulated providers, no cost. Live mode is limited to admins.'
-              : 'Simulated providers, no cost. Live mode is locked on this shared server.'
-            : 'Simulated providers, no API keys, no cost.'
-          : keys.length
-            ? `Live keys: ${keys.join(', ')}.`
-            : 'No API keys found in .env.'}
-      </p>
-      <Modal
-        open={confirm}
-        onClose={() => setConfirm(false)}
-        title="Switch to live mode?"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setConfirm(false)}>Stay in demo</Button>
-            <Button
-              loading={busy}
-              disabled={!keys.length || config.liveAllowed === false}
-              onClick={async () => {
-                setBusy(true);
-                await setMode('live').finally(() => setBusy(false));
-                setConfirm(false);
-              }}>
-              Switch to live
-            </Button>
-          </>
-        }>
-        <p className="text-[14.5px] leading-relaxed text-ink-2">
-          Live mode sends Playground and test-suite requests to the real providers and they are billed to your API keys. Synthetic traffic always stays simulated.
-        </p>
-        <p className="mt-3 text-[14px] text-ink">
-          {config.liveAllowed === false
-            ? enabled
-              ? 'Your account can’t switch to live mode, because it spends the server’s API keys. An admin can add your email to LIVE_MODE_EMAILS on the API.'
-              : 'This server is shared without sign-in, so live mode is locked: nobody here can spend its API keys.'
-            : keys.length
-              ? `Keys found for: ${keys.join(', ')}. Vendors without a key are skipped.`
-              : 'No API keys were found. Add them to .env and restart the API first.'}
-        </p>
-      </Modal>
+    <div className="rounded-2xl border border-line px-3.5 py-3">
+      <div className="flex items-center gap-2 text-[12.5px] font-medium text-ink-2">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-ink-3" aria-hidden="true" />
+        Sample data
+      </div>
+      <p className="mt-1 text-[12px] leading-relaxed text-ink-3">Providers, prices, scores and savings are simulated for illustration, not live measurements.</p>
     </div>
   );
 }

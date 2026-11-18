@@ -1,10 +1,8 @@
 import { Check, Filter, ListOrdered, ShieldCheck, X } from 'lucide-react';
-import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 
 import type { ModelInfo, RouteTrace } from '../../../shared/types';
-import { money, ms } from '../lib/format';
-import { fadeUp, stagger } from '../lib/motion';
+import { money, ms, signed } from '../lib/format';
 import { BrandOrb, Orb } from './Orb';
 import { TurnBadge } from './ui';
 
@@ -16,13 +14,13 @@ export function TraceTimeline({ trace, models }: { trace: RouteTrace; models: Mo
   const filtered = trace.candidates.filter((x) => !x.eligible);
 
   return (
-    <motion.ol variants={stagger} initial="hidden" animate="show" className="relative ml-2 border-l border-line pl-5">
+    <ol className="cascade relative ml-2 border-l border-line pl-5 [--cascade-start:60ms]">
       <Item icon={<BrandOrb size={20} />} plain title={<>ElevenRoute classified it <TurnBadge turnType={c.turnType} score={c.score} /></>}>
         {c.hits.length ? (
           <div className="flex flex-wrap gap-1.5">
             {c.hits.map((h, i) => (
               <span key={i} className="rounded-full bg-canvas px-2 py-0.5 font-mono text-[11.5px] text-ink-2 ring-1 ring-line">
-                {h.weight > 0 ? '+' : ''}{h.weight} {h.label}
+                {h.weight > 0 ? `+${h.weight}` : signed(h.weight)} {h.label}
               </span>
             ))}
           </div>
@@ -53,8 +51,8 @@ export function TraceTimeline({ trace, models }: { trace: RouteTrace; models: Mo
           {a.error ?? 'Response returned within the latency budget.'}
         </Item>
       ))}
-      <motion.li variants={fadeUp} className="text-[12px] text-ink-3">Routing overhead {ms(trace.overheadMs)} (time spent choosing a model, excluding the model call)</motion.li>
-    </motion.ol>
+      <li className="text-[12px] text-ink-3">Routing overhead {ms(trace.overheadMs)} (time spent choosing a model, excluding the model call)</li>
+    </ol>
   );
 }
 
@@ -62,10 +60,10 @@ function Item({ icon, title, children, tone, plain }: { icon: ReactNode; title: 
   // plain: the icon brings its own shape (the ElevenRoute logo), so no dot background.
   const dot = plain ? '' : tone === 'bad' ? 'bg-bad text-white' : tone === 'ok' ? 'bg-ok text-white' : 'bg-canvas text-ink-2 ring-1 ring-line';
   return (
-    <motion.li variants={fadeUp} className="relative mb-3.5">
+    <li className="relative mb-3.5">
       <span className={`absolute -left-[31px] top-0 flex h-5 w-5 items-center justify-center rounded-full ${dot}`} aria-hidden="true">{icon}</span>
       <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-medium text-ink">{title}</div>
       {children ? <div className="mt-1 text-[12.5px] leading-relaxed text-ink-3">{children}</div> : null}
-    </motion.li>
+    </li>
   );
 }

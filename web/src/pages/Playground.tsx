@@ -2,7 +2,7 @@ import { RotateCcw, Route, Send, TriangleExclamationPoint, X } from 'lucide-reac
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ChatRequest, ChatResponse, Language, ModelInfo, PreviewResponse, RoutingConfig, TestCase, TurnType, UseCase } from '../../../shared/types';
+import type { ChatRequest, ChatResponse, ModelInfo, PreviewResponse, RoutingConfig, TestCase, TurnType, UseCase } from '../../../shared/types';
 import { Collapse } from '../components/Collapse';
 import { Orb } from '../components/Orb';
 import { RoutingVisualiser } from '../components/RoutingVisualiser';
@@ -10,9 +10,9 @@ import { TraceTimeline } from '../components/TraceTimeline';
 import { Button, Card, Chip, ErrorNote, Page, PageHeader, Segmented, Status, TurnBadge } from '../components/ui';
 import { VendorControls } from '../components/VendorControls';
 import { api } from '../lib/api';
-import { LANGS, USE_CASES, modelName, money, ms } from '../lib/format';
+import { USE_CASES, modelName, money, ms } from '../lib/format';
 import { useMode } from '../lib/mode';
-import { base, spring } from '../lib/motion';
+import { base, fast, spring } from '../lib/motion';
 import { runFromChat } from '../lib/runs';
 import { useApi } from '../lib/useApi';
 
@@ -26,7 +26,7 @@ export default function Playground() {
   const cases = useApi<TestCase[]>('/tests/cases');
   const { config } = useMode();
   const [customer, setCustomer] = useState('default');
-  const [language, setLanguage] = useState<Language>('en');
+  const language = 'en';
   const [useCase, setUseCase] = useState<UseCase>('refund');
   const [conversationId, setConversationId] = useState(newConversation);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -105,15 +105,15 @@ export default function Playground() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         {/* chat */}
-        <motion.section variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: base } }} className="card flex min-h-[560px] flex-col overflow-hidden lg:h-[calc(100dvh-220px)]">
+        <section className="card flex min-h-[560px] flex-col overflow-hidden lg:h-[calc(100dvh-220px)]">
           <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
             <span className="text-[13px] text-ink-2">
-              {routing.data?.policies.find((p) => p.id === customer)?.name ?? 'Default'} · {LANGS.find((l) => l.value === language)?.label} · {USE_CASES.find((u) => u.value === useCase)?.label}
+              {routing.data?.policies.find((p) => p.id === customer)?.name ?? 'Default'} · {USE_CASES.find((u) => u.value === useCase)?.label}
             </span>
-            <span className="text-[12px] text-ink-3">{config?.mode === 'live' ? 'Live: real provider calls' : 'Demo: simulated providers'}</span>
+            {config?.mode === 'live' ? <span className="text-[12px] font-medium text-ember">Live: real provider calls</span> : null}
           </div>
 
-          <div ref={list} className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-5" aria-live="polite" aria-busy={sending}>
+          <div ref={list} className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5" aria-live="polite" aria-busy={sending}>
             {messages.length === 0 && !sending ? (
               <div className="m-auto max-w-sm text-center">
                 <p className="h-display text-xl">Start with a suggestion</p>
@@ -123,7 +123,7 @@ export default function Playground() {
             <AnimatePresence initial={false}>
               {messages.map((m) =>
                 m.role === 'user' ? (
-                  <motion.div key={m.id} initial={{ opacity: 0, y: 10, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={spring} className="max-w-[85%] self-end rounded-[20px] rounded-br-md bg-ink px-4 py-2.5 text-[15px] leading-relaxed text-white">
+                  <motion.div key={m.id} initial={{ opacity: 0, y: 10, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={spring} className="max-w-[85%] self-end rounded-[20px] rounded-br-md bg-ink px-4 py-2.5 text-[15px] leading-relaxed text-white [overflow-wrap:anywhere]">
                     {m.text}
                   </motion.div>
                 ) : (
@@ -136,7 +136,7 @@ export default function Playground() {
           </div>
 
           <div className="border-t border-line bg-canvas/60 px-4 py-3 sm:px-5">
-            <div className="scroll-x mb-2.5 flex gap-1.5 pb-0.5">
+            <div className="scroll-x fade-x mb-2.5 flex gap-1.5 pr-8 pb-0.5">
               {suggestions.map((c) => (
                 <Chip key={c.id} onClick={() => send(c.message)} className="shrink-0">
                   <TurnBadge turnType={liveTypes[c.id] ?? c.turnType} />
@@ -155,13 +155,14 @@ export default function Playground() {
                 id="pg-input"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={language === 'es' ? 'Escribe un mensaje del cliente…' : 'Type a customer message…'}
+                placeholder="Type a customer message…"
+                enterKeyHint="send"
                 className="h-11 min-w-0 flex-1 rounded-full border border-line bg-canvas px-4 text-[15px] placeholder:text-ink-3 focus:border-ink/30 focus:outline-none"
               />
               <Button type="submit" icon={Send} loading={sending} disabled={!input.trim()}>Send</Button>
             </form>
           </div>
-        </motion.section>
+        </section>
 
         {/* side panel */}
         <div className="flex min-w-0 flex-col gap-5 lg:sticky lg:top-6 lg:self-start">
@@ -173,10 +174,6 @@ export default function Playground() {
                   <Segmented size="sm" label="Customer policy" value={customer} onChange={setCustomer} options={(routing.data?.policies ?? []).map((p) => ({ value: p.id, label: p.name }))} />
                 </div>
               ) : null}
-              <div className="flex flex-col gap-1.5">
-                <span className="label">Language</span>
-                <Segmented size="sm" label="Language" value={language} onChange={setLanguage} options={LANGS} />
-              </div>
               <div className="flex flex-col gap-1.5">
                 <span className="label">Call type</span>
                 <div className="flex flex-wrap gap-1.5">
@@ -203,7 +200,7 @@ export default function Playground() {
             role="status"
             initial={{ opacity: 0, y: 16, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10 }}
+            exit={{ opacity: 0, y: 10, transition: fast }}
             transition={spring}
             className="fixed right-4 bottom-28 z-50 flex max-w-sm items-start gap-3 rounded-2xl border border-warn/30 bg-canvas p-4 shadow-[var(--shadow-lift)] lg:bottom-6">
             <TriangleExclamationPoint size={18} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
@@ -229,7 +226,7 @@ function AgentReply({ msg, models, active, onVisualise }: { msg: Extract<Msg, { 
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={base}
-      className={`max-w-[94%] self-start rounded-[20px] rounded-bl-md border bg-canvas p-4 transition-[border-color,box-shadow] ${active ? 'border-ink/25 shadow-[var(--shadow-card)]' : 'border-line'}`}>
+      className={`max-w-[94%] self-start rounded-[20px] rounded-bl-md border bg-canvas p-4 transition-[border-color] duration-300 ${active ? 'border-ink/25 shadow-[var(--shadow-card)]' : 'border-line'}`}>
       <header className="flex flex-wrap items-center gap-2">
         <Orb model={model} size={22} />
         <span className="text-[14px] font-medium">{modelName(models, res.model_used)}</span>
@@ -237,7 +234,7 @@ function AgentReply({ msg, models, active, onVisualise }: { msg: Extract<Msg, { 
         {res.failover_used ? <Status kind="warn" label="Failover" /> : null}
         {!res.model_used ? <Status kind="fail" label="All providers failed" /> : null}
       </header>
-      <p className="mt-2.5 text-[15px] leading-relaxed text-ink">{res.reply}</p>
+      <p className="mt-2.5 text-[15px] leading-relaxed text-ink [overflow-wrap:anywhere]">{res.reply}</p>
       <div className="mt-3 flex flex-wrap gap-1.5 font-mono text-[11.5px] text-ink-2">
         <span className="rounded-full bg-card px-2.5 py-1">{money(res.cost_usd)} cost</span>
         <span className="rounded-full bg-card px-2.5 py-1">{ms(res.latency_ms)} latency</span>

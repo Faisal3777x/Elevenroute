@@ -8,10 +8,11 @@ import { AnimatedNumber } from '../components/AnimatedNumber';
 import { ChartTooltip } from '../components/ChartTooltip';
 import { Orb } from '../components/Orb';
 import { InfoTip } from '../components/Tooltip';
-import { Card, Chip, Empty, ErrorNote, Page, PageHeader, Segmented, SimulatedTag, Skeleton } from '../components/ui';
+import { Card, Chip, Empty, ErrorNote, Page, PageHeader, Segmented, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
-import { count, money, ms, pct } from '../lib/format';
-import { base, fadeUp, spring } from '../lib/motion';
+import { money, ms, pct, plural } from '../lib/format';
+import { base, spring } from '../lib/motion';
+import { spotlight } from '../lib/spotlight';
 import { INK3, LINE, modelColor, sortModels } from '../lib/theme';
 import { useApi } from '../lib/useApi';
 
@@ -32,7 +33,9 @@ export default function WhatIf() {
   const setFrom = (id: string) => { setPicked(true); if (id === to) setToRaw(from); setFromRaw(id); };
   const setTo = (id: string) => { setPicked(true); if (id === from) setFromRaw(to); setToRaw(id); };
   const [share, setShare] = useState(50);
-  const [turnType, setTurnType] = useState<TurnType | 'all'>('simple');
+  // All turns by default: the model with the most spend is usually the one serving complex turns, so a "simple only"
+  // default moved nothing and opened the page on "no change".
+  const [turnType, setTurnType] = useState<TurnType | 'all'>('all');
   const [volume, setVolume] = useState(0);
   const [result, setResult] = useState<WhatIfResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +69,6 @@ export default function WhatIf() {
   return (
     <Page>
       <PageHeader
-        eyebrow={<SimulatedTag>Simulation · not realised savings</SimulatedTag>}
         title="What-if"
         subtitle="Shift a share of logged traffic from one model to another and see the projected cost, quality and latency trade-off before changing any rule."
       />
@@ -109,13 +111,13 @@ export default function WhatIf() {
       </Card>
 
       {!result && !error ? <Skeleton className="h-64" /> : null}
-      {result && result.loggedTurns === 0 ? <Empty title="No logged traffic" body="The simulator re-prices logged token counts. Generate traffic on the Overview page first." /> : null}
+      {result && result.loggedTurns === 0 ? <Empty title="No logged traffic" body="What-if re-prices logged token counts. Generate traffic on the Overview page first." /> : null}
 
       {result && result.loggedTurns > 0 ? (
         <>
           <Headline r={result} from={name(from)} to={name(to)} share={share} turnType={turnType} />
           <Allocation r={result} models={list} />
-          <motion.div variants={fadeUp} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="cascade grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <TradeOff
               title="Quality on moved traffic"
               info="Latest test scores for each language and turn type the moved traffic covers (or the configured estimate before the first test run)."
@@ -134,9 +136,9 @@ export default function WhatIf() {
             />
             <Metric title="Traffic moved" value={result.movedTurnsPct} format={(n) => pct(n, 1)} note="of all logged turns" />
             <Metric title="Blocked by customer policy" value={result.blockedPct} format={(n) => pct(n, 0)} note={`of matching turns can't move to ${name(to)}`} info="Turns whose customer policy (allowed vendors or data region) forbids the destination model. They stay where they are." />
-          </motion.div>
+          </div>
           <p className="text-[12.5px] leading-relaxed text-ink-3">
-            Method: logged token counts re-priced at current catalogue prices and scaled {result.loggedConversations != null && result.windowDays != null ? <>from {count(result.loggedConversations)} logged conversations over {count(result.windowDays)} {result.windowDays === 1 ? 'day' : 'days'} </> : null}to {count(result.monthlyConversations)} conversations a month. This is a projection, not a measured saving. In demo mode the logged traffic itself comes from simulated providers.
+            Method: logged token counts re-priced at current catalogue prices and scaled {result.loggedConversations != null && result.windowDays != null ? <>from {plural(result.loggedConversations, 'logged conversation')} over {plural(result.windowDays, 'day')} </> : null}to {plural(result.monthlyConversations, 'conversation')} a month. This is a projection, not a measured saving. With sample data, the logged traffic itself comes from simulated providers.
           </p>
         </>
       ) : null}
@@ -165,17 +167,17 @@ function Headline({ r, from, to, share, turnType }: { r: WhatIfResult; from: str
   const pctChange = r.currentMonthly ? (Math.abs(r.delta) / r.currentMonthly) * 100 : 0;
   const Icon = saving ? TrendingDown : increase ? TrendingUp : Minus;
   return (
-    <motion.section variants={fadeUp} className={`card relative overflow-hidden p-6 sm:p-8 ${saving ? '' : ''}`}>
+    <section className={`card relative overflow-hidden p-6 sm:p-8 ${saving ? '' : ''}`}>
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -top-32 -right-24 h-96 w-96 transition-[background] duration-500"
+        className="glow-drift pointer-events-none absolute -top-32 -right-24 h-96 w-96"
         style={{ background: `radial-gradient(closest-side, ${saving ? 'rgb(22 121 74 / 0.1)' : increase ? 'rgb(255 71 4 / 0.1)' : 'rgb(235 232 228 / 0.8)'}, transparent)` }}
       />
       <div className="relative grid gap-6 lg:grid-cols-[auto_1fr] lg:items-center lg:gap-10">
         <div>
           <div className="flex items-center gap-2">
             <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold tracking-wide uppercase ${saving ? 'bg-ok/10 text-ok' : increase ? 'bg-ember/10 text-[#b8420e]' : 'bg-line text-ink-2'}`}>
-              <Icon size={13} aria-hidden="true" /> {saving ? 'Simulated savings' : increase ? 'Simulated increase' : 'No change'}
+              <Icon size={13} aria-hidden="true" /> {saving ? 'Projected saving' : increase ? 'Projected increase' : 'No change'}
             </span>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
@@ -205,7 +207,7 @@ function Headline({ r, from, to, share, turnType }: { r: WhatIfResult; from: str
           </div>
         </div>
       </div>
-    </motion.section>
+    </section>
   );
 }
 
@@ -225,10 +227,10 @@ function Allocation({ r, models }: { r: WhatIfResult; models: ModelInfo[] }) {
             <CartesianGrid horizontal={false} stroke={LINE} />
             <XAxis type="number" tickFormatter={(v: number) => money(v)} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} />
             <YAxis type="category" dataKey="name" width={84} tickLine={false} axisLine={false} tick={{ fontSize: 12.5, fill: '#0c0b0a' }} />
-            <Tooltip cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={money} total />} />
+            <Tooltip animationDuration={160} animationEasing="ease-out" cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={money} total />} />
             {ids.map((id, i) => {
               const m = models.find((x) => x.id === id);
-              return <Bar key={id} dataKey={id} name={m?.name ?? id} stackId="a" fill={modelColor(m)} radius={i === ids.length - 1 ? [0, 6, 6, 0] : 0} isAnimationActive={!reduce} animationDuration={500} />;
+              return <Bar key={id} dataKey={id} name={m?.name ?? id} stackId="a" fill={modelColor(m)} radius={i === ids.length - 1 ? [0, 6, 6, 0] : 0} isAnimationActive={!reduce} animationDuration={750} animationEasing="ease-out" />;
             })}
           </BarChart>
         </ResponsiveContainer>
@@ -255,7 +257,7 @@ function Allocation({ r, models }: { r: WhatIfResult; models: ModelInfo[] }) {
 
 function TradeOff({ title, from, to, tone, note, info }: { title: string; from: string; to: string; tone: 'better' | 'worse' | 'same'; note: string; info?: string }) {
   return (
-    <motion.div variants={fadeUp} className="card flex flex-col gap-2 p-5">
+    <div {...spotlight("card flex flex-col gap-2 p-5")}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-ink-2">{title}</span>
         {info ? <InfoTip content={info} label={`About ${title}`} /> : null}
@@ -266,19 +268,19 @@ function TradeOff({ title, from, to, tone, note, info }: { title: string; from: 
         <motion.span key={`to-${to}`} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={base} className="h-display text-[26px]">{to}</motion.span>
       </div>
       <span className={`text-[12.5px] font-medium ${tone === 'better' ? 'text-ok' : tone === 'worse' ? 'text-warn' : 'text-ink-3'}`}>{note}</span>
-    </motion.div>
+    </div>
   );
 }
 
 function Metric({ title, value, format, note, info }: { title: string; value: number; format: (n: number) => string; note: string; info?: string }) {
   return (
-    <motion.div variants={fadeUp} className="card flex flex-col gap-2 p-5">
+    <div {...spotlight("card flex flex-col gap-2 p-5")}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-ink-2">{title}</span>
         {info ? <InfoTip content={info} label={`About ${title}`} /> : null}
       </div>
       <AnimatedNumber value={value} format={format} className="h-display text-[28px]" />
       <span className="text-[12.5px] text-ink-3">{note}</span>
-    </motion.div>
+    </div>
   );
 }

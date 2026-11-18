@@ -3,6 +3,8 @@ import type { Language, ModelInfo, UseCase } from '../../../shared/types';
 export function money(n: number): string {
   if (n === 0) return '$0';
   if (Math.abs(n) < 0.01) return `$${n.toFixed(5)}`;
+  // Under $1, three significant digits: $0.015 must not show as "$0.01".
+  if (Math.abs(n) < 1) return `$${n.toPrecision(3).replace(/(\.\d{2}\d*?)0+$/, '$1')}`;
   if (Math.abs(n) < 100) return `$${n.toFixed(2)}`;
   return `$${Math.round(n).toLocaleString('en-US')}`;
 }
@@ -27,7 +29,7 @@ export function timeAgo(ts: number): string {
 
 export const LANGS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'es', label: 'Español' },];
+];
 
 export const USE_CASES: { value: UseCase; label: string }[] = [
   { value: 'appointment', label: 'Appointment' },

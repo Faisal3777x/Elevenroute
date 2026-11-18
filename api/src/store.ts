@@ -1,7 +1,7 @@
 // Workspaces and their cached routing state. Each user's data lives in their workspace. Config is stored
 // in workspace_settings and held in memory per workspace, so a routing decision never touches the database.
 import type {
-  ClassifierRule, CustomerPolicy, LanguagePref, Mode, ModelInfo, RoutingConfig, Strategy, Vendor, VendorState,
+  AgentSession, ClassifierRule, CustomerPolicy, LanguagePref, Mode, ModelInfo, RoutingConfig, Strategy, Vendor, VendorState,
 } from '../../shared/types.ts';
 import { Breaker } from './breaker.ts';
 import { db } from './db.ts';
@@ -29,6 +29,8 @@ export class Workspace {
   readonly pins = new Map<string, string>();
   readonly breaker = new Breaker(() => this.strategy);
   readonly traffic = { running: false, done: 0, total: 0 };
+  /** ElevenAgent conversations in progress, by session id (in-process, like the sticky pins). */
+  readonly agentSessions = new Map<string, AgentSession>();
 
   readonly id: string;
 
@@ -69,6 +71,7 @@ export class Workspace {
     for (const key of SETTING_KEYS) (this as any)[key] = fresh[key];
     this.vendorStates = healthy();
     this.pins.clear();
+    this.agentSessions.clear();
     this.breaker.reset();
   }
 }

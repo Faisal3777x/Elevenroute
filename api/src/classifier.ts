@@ -12,7 +12,7 @@ const ENTITY = [
   /(^|\D)\d{4,}(\D|$)/, // order / booking numbers
   /\b\d{1,2}(:\d{2})?\s?(am|pm)\b/i, // 3pm, 10:30 am
   /\b\d{1,2}:\d{2}\b/,
-  /\b(tomorrow|today|tonight|monday|tuesday|wednesday|thursday|friday|mañana|hoy|lunes|martes|miércoles|jueves|viernes)\b/i,
+  /\b(tomorrow|today|tonight|monday|tuesday|wednesday|thursday|friday)\b/i,
 ];
 
 export function classify(message: string, useCase: UseCase, rules: ClassifierRule[], threshold: number): Classification {

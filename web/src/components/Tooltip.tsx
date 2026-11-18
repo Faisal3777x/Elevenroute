@@ -1,21 +1,63 @@
 import { Info } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
-import { fast } from '../lib/motion';
+import { EASE } from '../lib/motion';
 
-/** Accessible tooltip: opens on hover and keyboard focus, described by aria-describedby. */
+/** Hover waits this long before a tooltip opens, so a pointer passing over an "i" doesn't flash it open. */
+const OPEN_DELAY_MS = 400;
+/** Within this long after one tooltip closes, the next opens at once and without animation (reading along a row). */
+const SKIP_WINDOW_MS = 300;
+let openCount = 0;
+let lastClosedAt = 0;
+const warm = () => openCount > 0 || Date.now() - lastClosedAt < SKIP_WINDOW_MS;
+
+/**
+ * Accessible tooltip: opens on hover (after a short delay) and at once on keyboard focus, described by
+ * aria-describedby. It grows out of its trigger, and once one tooltip has been read the next opens instantly.
+ */
 export function Tooltip({ content, children, side = 'top', className = '' }: { content: ReactNode; children: ReactNode; side?: 'top' | 'bottom'; className?: string }) {
   const [open, setOpen] = useState(false);
+  const [instant, setInstant] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const id = useId();
+
+  const show = (immediate: boolean) => {
+    clearTimeout(timer.current);
+    if (immediate || warm()) {
+      setInstant(warm());
+      setOpen(true);
+      return;
+    }
+    timer.current = setTimeout(() => {
+      setInstant(false);
+      setOpen(true);
+    }, OPEN_DELAY_MS);
+  };
+  const hide = () => {
+    clearTimeout(timer.current);
+    setOpen(false);
+  };
+
+  // Count open tooltips across the page, and note when the last one closed, for the instant follow-on.
+  useEffect(() => {
+    if (!open) return;
+    openCount++;
+    return () => {
+      openCount--;
+      lastClosedAt = Date.now();
+    };
+  }, [open]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
   return (
     <span
       className={`relative inline-flex ${className}`}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
-      onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
+      onMouseEnter={() => show(false)}
+      onMouseLeave={hide}
+      onFocus={() => show(true)}
+      onBlur={hide}
+      onKeyDown={(e) => e.key === 'Escape' && hide()}
       aria-describedby={open ? id : undefined}>
       {children}
       <AnimatePresence>
@@ -23,10 +65,11 @@ export function Tooltip({ content, children, side = 'top', className = '' }: { c
           <motion.span
             id={id}
             role="tooltip"
-            initial={{ opacity: 0, y: side === 'top' ? 4 : -4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, transition: { duration: 0.1 } }}
-            transition={fast}
+            initial={instant ? false : { opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, transition: { duration: instant ? 0 : 0.1 } }}
+            transition={{ duration: 0.125, ease: EASE }}
+            style={{ transformOrigin: side === 'top' ? 'bottom center' : 'top center' }}
             className={`pointer-events-none absolute left-1/2 z-50 w-max max-w-[260px] -translate-x-1/2 rounded-xl bg-ink px-3 py-2 text-left text-xs leading-relaxed font-normal text-white shadow-[var(--shadow-float)] ${
               side === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
             }`}>
@@ -42,7 +85,7 @@ export function Tooltip({ content, children, side = 'top', className = '' }: { c
 export function InfoTip({ content, label = 'More information' }: { content: ReactNode; label?: string }) {
   return (
     <Tooltip content={content}>
-      <button type="button" aria-label={label} className="inline-flex h-5 w-5 items-center justify-center rounded-full text-ink-3 hover:text-ink">
+      <button type="button" aria-label={label} className="inline-flex h-5 w-5 items-center justify-center rounded-full text-ink-3 transition-[color,opacity] hover:text-ink active:opacity-60">
         <Info size={14} aria-hidden="true" />
       </button>
     </Tooltip>

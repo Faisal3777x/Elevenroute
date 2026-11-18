@@ -97,10 +97,10 @@ Supabase dashboard settings: Authentication → URL Configuration must list ever
 | | Demo (default) | Live |
 |---|---|---|
 | API keys | none | at least one of `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` in `.env` |
-| Providers | simulated cost, latency, error rate, quality, canned replies in English and Spanish | direct HTTPS calls to each vendor's API |
+| Providers | simulated cost, latency, error rate, quality, canned replies in English | direct HTTPS calls to each vendor's API |
 | Test judge | simulated from quality settings plus noise | strongest model that has a key |
 
-Copy `.env.example` to `.env`. Switch with `MODE=demo|live` or the Demo / Live toggle on Overview. Keys are read only from the environment and never stored, logged or returned (`/config` reports only true or false per vendor). Synthetic traffic always uses the simulated providers, so it never spends API credit.
+Copy `.env.example` to `.env`. Demo or live is a setting of each workspace (new ones start in demo). The dashboard has no switch for it: send `POST /mode` with `{"mode": "live"}` (or `"demo"`). A shared server (`DEMO_ONLY`) refuses live mode. Keys are read only from the environment and never stored, logged or returned (`/config` reports only true or false per vendor). Synthetic traffic always uses the simulated providers, so it never spends API credit.
 
 Demo prices, latencies and quality scores are illustrative simulation settings, not vendor quotes.
 
@@ -124,13 +124,13 @@ Every decision carries a plain-English reason and a full route trace.
 | Routing rules | live dry-run preview (score gauge, matched rules, animated candidate ranking, diagram), quality-threshold scale, customer policies with allowed models, strategy, language preferences, classifier rules |
 | Providers | a card per provider with Healthy / Down / Slow switches, breaker and key status, model tiles (pricing, latency, quality, test score vs floor), edit and add dialogs, and a traffic-redirect panel during a simulated outage |
 | Test results | animated run progress, scorecards with change vs the previous run, model comparison chart, heatmap by call type / language / turn type, quality alerts, expandable scored conversations, run history |
-| What-if | traffic-share slider, simulated savings headline, current vs optimised allocation chart, quality / latency / policy trade-offs |
+| What-if | traffic-share slider, projected savings headline, current vs optimised allocation chart, quality / latency / policy trade-offs |
 
 **Routing visualiser.** Replays one real routing trace step by step: request → classification → policy, language and quality checks → each provider attempt (failed attempts turn red and fail over) → selected model → response back to the customer. It only draws what the API returned (`/chat` traces, or `/route/preview` dry runs, which are labelled as such). Play, pause and replay controls; with reduced motion it shows the final route as a static diagram plus a written step list.
 
-**Honesty rules.** Demo mode is flagged on every page. Savings are labelled *Estimate* (Overview) or *Simulated* (What-if). Simulated outages are labelled as test switches.
+**Honesty rules.** The site looks like a product, not a prototype, but simulated numbers are never passed off as measurements: every dashboard page carries one quiet "Sample data" note (sidebar on desktop, page foot on phones), the landing page says "Sample data" under its live demos and figures, and the agent pages say the Salesforce and SAP connectors are sample connectors. Savings are called *estimated* (Overview) or *projected* (What-if). Simulated outages are labelled as test switches. Live mode, when switched on through the API, shows a cost-warning strip.
 
-**Motion.** Shared settings in `web/src/lib/motion.ts` (150–400 ms for interface motion, springs for presses and layout). `MotionConfig reducedMotion="user"` plus a CSS fallback respect `prefers-reduced-motion`. Animations use transform and opacity.
+**Motion.** Shared settings in `web/src/lib/motion.ts` (150–400 ms for interface motion, springs for presses and layout). `MotionConfig reducedMotion="user"` plus a CSS fallback respect `prefers-reduced-motion`. Animations use transform and opacity; hover elevation fades a pseudo-element's shadow (`.lift`) rather than animating `box-shadow`. The landing hero's orb leans towards the pointer and settles as you scroll (mouse only, off with reduced motion).
 
 ## Phone app (`app/`)
 
@@ -150,7 +150,7 @@ Overview, Playground, Providers and Tests tabs on iOS and Android (Expo Go). Its
 | GET, PUT | `/routing`, `/routing/strategy`, `/routing/rules`, `/routing/policies`, `/routing/languages` | routing configuration |
 | POST, GET | `/tests/run`, `/tests/cases`, `/tests/results`, `/tests/runs`, `/alerts` | test suite |
 | POST, GET | `/traffic/generate`, `/traffic/status`, `/traffic/clear` | synthetic traffic; clear deletes logged turns only |
-| GET, POST | `/config`, `/mode` | mode switch; key presence only |
+| GET, POST | `/config`, `/mode` | demo or live mode (no button in the dashboard); key presence only |
 | POST | `/reset` | re-seed your workspace with the demo setup |
 | GET | `/me` | signed-in user, their workspace, whether sign-in and Supabase are on |
 
@@ -167,7 +167,7 @@ api/src/
   classifier.ts    simple vs complex (editable rules)
   breaker.ts       per-vendor circuit breaker
   providers.ts     simulated providers and live OpenAI / Gemini / Anthropic calls
-  content.ts       24 test conversations, canned replies, apologies
+  content.ts       12 test conversations, canned replies, apologies
   evaluation.ts    test runner, judges, alerts, automatic exclusion
   stats.ts         dashboard aggregations and what-if
   traffic.ts       synthetic conversations and incident replay
@@ -178,7 +178,7 @@ api/src/
 api/migrations/    SQL schema and row-level security
 api/test/          router, failover and end-to-end API tests
 web/src/
-  App.tsx          shell: sidebar / pill navigation, mode banner and switch, page transitions
+  App.tsx          shell: sidebar / pill navigation, sample-data note, live-mode warning, page transitions
   pages/           the six dashboard pages
   components/      RoutingVisualiser, TraceTimeline, Kpi, AnimatedNumber, Modal, Tooltip, UI kit
   lib/             API client, motion settings, formatting, theme, mode context
@@ -187,11 +187,30 @@ app/src/components tabs, UI kit, charts, orbs, route trace, outage switches
 shared/types.ts    API types shared by api/, web/ and app/
 ```
 
+## Ad film
+
+The landing page's ad (`web/public/promo.mp4`: 71.8 s, 1920×1080, H.264 with an AAC soundtrack, about 12.5 MB) is rendered from a page in the app: `web/src/pages/AdFilm.tsx`, at **/ad**. Open http://localhost:5173/ad to watch it live (it loops, scales to the window and plays without sound). Everything in it is drawn from a single clock, so it renders identically every time.
+
+**Music:** the soundtrack of the owner's own video `ElevenRoute-showcase.mov` (54.4 s, 110.02 BPM, C major: a short swell, then a four-bar loop with the drums, claps from bar 5, a riser and a final hit). Its rights are the owner's, so the source audio stays out of git: `scripts/ad-music.mjs --source path/to/ElevenRoute-showcase.mov` keeps a copy in `tools/ad-music-source.wav` (gitignored). The script then builds the edit on the bar grid:
+- bars 0–19, then bars 12–19 again (two more loops, so the harmony carries on), then the riser and the final hit, which lands under the end card;
+- during the outage the music stutters with the glitch, goes muffled (a low-pass filter) while the provider is down, and opens up again as the turn is answered.
+
+**Timing:** the film is written in "story" seconds on a 2-second bar. It plays one bar of the music (a bar is 2.1814 s) per story bar, 9% slower than written, so every scene starts on a bar line. The hook's first line sits on the opening swell and the drums arrive with its second line, the logo drops as the claps come in, and the CFO's reply gets one extra bar while the riser builds into the final hit. `storyAt()`/`realAt()` convert between the two clocks, and `KICKS` drives the beat pulses. Changing the edit in the script means changing those, `FILM_SECONDS` and the script's `LENGTH` together.
+
+To re-render after editing `AdFilm.tsx` or the music:
+
+1. `node scripts/ad-music.mjs` writes `tools/ad-music.wav` (set `FFMPEG` if ffmpeg isn't on your PATH; the first run needs `--source`).
+2. Open `/ad?render` in a browser sized exactly 1920×1080 (for example Playwright with headless Chrome).
+3. For each frame `f` from 0 to 2153, call `window.__adSetTime(f / 30)` and save a screenshot as `frames/0001.jpg` … `frames/2154.jpg`. Headless Chrome manages about 9 frames a second; four processes on separate ranges take about two minutes.
+4. Encode with the music: `ffmpeg -framerate 30 -i frames/%04d.jpg -i tools/ad-music.wav -map 0:v -map 1:a -c:v libx264 -preset slow -crf 24 -pix_fmt yuv420p -c:a aac -b:a 160k -shortest -movflags +faststart web/public/promo.mp4`
+5. Save the poster from `window.__adSetTime(70)` as `web/public/promo-poster.jpg`.
+
+On the landing page the film starts muted (browsers only autoplay muted videos) with a **Sound on** button that restarts it with the music. The MP4 is ready to post as is (X, LinkedIn and others accept H.264/AAC MP4).
+
 ## Limits and next steps
 
 - **Live mode** calls the vendor APIs directly but hasn't been run against real keys. Check the model names (`liveModel`) and prices in Providers first.
 - **The classifier** is rules-based. A small learned classifier trained on logged turns and judge labels is the next step.
-- **Sticky conversations** that start complex stay on the flagship model for later simple turns. That keeps one voice per call but costs more; consider a "downgrade on simple turns" option if cost matters more.
 - **In-process state** per workspace (circuit breaker, sticky pins, simulated outage switches, cached config) lives in one API process. Run one instance, or move it to Redis or similar for several.
 - **Workspaces are personal.** Inviting teammates into a shared workspace (roles are already in `workspace_members`) is the next step.
 - **Supabase emails** use Supabase's built-in sender, limited to a few emails per hour. Add your own SMTP under Authentication → Emails before inviting a team.

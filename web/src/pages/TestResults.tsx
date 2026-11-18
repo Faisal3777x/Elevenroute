@@ -9,11 +9,11 @@ import { ChartTooltip } from '../components/ChartTooltip';
 import { Modal } from '../components/Modal';
 import { Orb } from '../components/Orb';
 import { Tooltip as Tip } from '../components/Tooltip';
-import { Button, Card, Chip, Empty, ErrorNote, Page, PageHeader, Segmented, SimulatedTag, Skeleton, Status, TurnBadge } from '../components/ui';
+import { Button, Card, Chip, Empty, ErrorNote, Page, PageHeader, Segmented, Skeleton, Status, TurnBadge } from '../components/ui';
 import { api } from '../lib/api';
-import { LANGS, USE_CASES, modelName, ms, score, timeAgo } from '../lib/format';
-import { useMode } from '../lib/mode';
-import { base, fadeUp, spring } from '../lib/motion';
+import { USE_CASES, modelName, ms, plural, score, timeAgo } from '../lib/format';
+import { base, EASE } from '../lib/motion';
+import { spotlight } from '../lib/spotlight';
 import { INK3, LINE, modelColor } from '../lib/theme';
 import { useApi } from '../lib/useApi';
 
@@ -27,7 +27,6 @@ export default function TestResults() {
   const alerts = useApi<Alert[]>('/alerts');
   const routing = useApi<RoutingConfig>('/routing');
   const cases = useApi<TestCase[]>('/tests/cases');
-  const { config } = useMode();
   const [running, setRunning] = useState<{ started: number } | null>(null);
   const [done, setDone] = useState<{ id: number; seconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +74,7 @@ export default function TestResults() {
     for (const r of results.data ?? []) map.set(r.modelId, [...(map.get(r.modelId) ?? []), r]);
     return map;
   }, [results.data]);
-  const caseCount = cases.data?.length ?? 24;
+  const caseCount = cases.data?.length ?? 0;
   const modelCount = (models.data ?? []).filter((m) => m.enabled).length;
   const prevScores = runs.data?.[1]?.scores;
 
@@ -83,8 +82,7 @@ export default function TestResults() {
     <Page>
       <PageHeader
         title="Test results"
-        subtitle={`${caseCount} conversations: 6 call types × English and Spanish × simple and complex. Every model gets the same tests; a model under the floor is removed from routing automatically.`}
-        eyebrow={config?.mode === 'live' ? <SimulatedTag>Live judge: strongest model with a key</SimulatedTag> : <SimulatedTag>Demo: simulated judge</SimulatedTag>}
+        subtitle={`${caseCount ? `${caseCount} conversations: ` : ''}6 call types, each simple and complex. Every model gets the same tests; a model under the floor is removed from routing automatically.`}
         actions={
           <>
             <Button variant="secondary" icon={RotateCcw} onClick={() => setConfirmReset(true)} disabled={!!running || !runs.data?.length}>Reset tests</Button>
@@ -127,9 +125,9 @@ export default function TestResults() {
 
       {tested.length > 0 && results.data ? (
         <>
-          <motion.div variants={fadeUp} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="cascade grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {tested.map((m) => <Scorecard key={m.id} model={m} rows={perModel.get(m.id) ?? []} floor={floor} prev={prevScores?.[m.id]} />)}
-          </motion.div>
+          </div>
           <Comparison models={tested} perModel={perModel} floor={floor} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.4fr_1fr]">
             <Heatmap models={tested} results={results.data} />
@@ -154,14 +152,14 @@ function RunProgress({ running, done, models, cases }: { running: { started: num
     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={base} className="overflow-hidden" role="status">
       <div className="card flex flex-col gap-3 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2 text-[14px]">
-          <span className="font-medium">{running ? `Scoring ${models} models × ${cases} conversations…` : `Run #${done?.id} complete`}</span>
+          <span className="font-medium">{running ? `Scoring ${plural(models, 'model')} × ${plural(cases, 'conversation')}…` : `Run #${done?.id} complete`}</span>
           <span className="font-mono text-[12.5px] text-ink-3">{running ? `${elapsed.toFixed(1)} s` : `${done?.seconds.toFixed(1)} s · ${models * cases} scored replies`}</span>
         </div>
         <div className="relative h-1.5 overflow-hidden rounded-full bg-line">
           {running ? (
-            <motion.div className="absolute inset-y-0 w-1/3 rounded-full bg-ink" initial={{ left: '-33%' }} animate={{ left: '100%' }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }} />
+            <motion.div className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-ink" initial={{ x: '-100%' }} animate={{ x: '300%' }} transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }} />
           ) : (
-            <motion.div className="h-full rounded-full bg-ok" initial={{ width: '0%' }} animate={{ width: '100%' }} transition={base} />
+            <motion.div className="h-full origin-left rounded-full bg-ok" initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={base} />
           )}
         </div>
         {running ? <span className="text-[12px] text-ink-3">The API scores the whole suite in one request, so progress is shown as elapsed time rather than a percentage.</span> : null}
@@ -174,11 +172,11 @@ function Scorecard({ model: m, rows, floor, prev }: { model: ModelInfo; rows: Te
   const s = m.testScore ?? 0;
   const change = prev ? ((s - prev) / prev) * 100 : null;
   return (
-    <motion.div variants={fadeUp} whileHover={{ y: -2 }} transition={spring} className={`card flex flex-col gap-3 p-5 transition-shadow hover:shadow-[var(--shadow-lift)] ${m.excluded ? 'ring-1 ring-bad/30' : ''}`}>
+    <div {...spotlight(`card flex flex-col gap-3 p-5 ${m.excluded ? 'ring-1 ring-bad/30' : ''}`)}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2.5">
           <Orb model={m} size={28} />
-          <span className="truncate text-[15px] font-medium">{m.name}</span>
+          <span className="truncate text-[15px] font-medium" title={m.name}>{m.name}</span>
         </div>
         {m.excluded ? <Status kind="excluded" /> : <Status kind="ok" label="Above floor" />}
       </div>
@@ -192,7 +190,7 @@ function Scorecard({ model: m, rows, floor, prev }: { model: ModelInfo; rows: Te
         ) : null}
       </div>
       <div className="relative h-2 rounded-full bg-line">
-        <motion.div className="h-full rounded-full" style={{ background: modelColor(m) }} initial={{ width: 0 }} animate={{ width: `${s * 100}%` }} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }} />
+        <motion.div className="h-full origin-left rounded-full" style={{ background: modelColor(m) }} initial={{ scaleX: 0 }} animate={{ scaleX: Math.min(1, Math.max(0, s)) }} transition={{ duration: 0.5, ease: EASE }} />
         <span className="absolute -top-1 h-4 w-0.5 rounded bg-ink" style={{ left: `${floor * 100}%` }} title={`Exclusion floor ${floor}`} aria-hidden="true" />
       </div>
       <dl className="grid grid-cols-4 gap-2 text-[12px]">
@@ -201,7 +199,7 @@ function Scorecard({ model: m, rows, floor, prev }: { model: ModelInfo; rows: Te
         <Stat label="Tone" value={`${avg(rows.map((r) => r.tone)).toFixed(1)}/5`} />
         <Stat label="Latency" value={ms(avg(rows.map((r) => r.latencyMs)))} />
       </dl>
-    </motion.div>
+    </div>
   );
 }
 
@@ -237,9 +235,9 @@ function Comparison({ models, perModel, floor }: { models: ModelInfo[]; perModel
             <CartesianGrid vertical={false} stroke={LINE} />
             <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} interval={0} />
             <YAxis tickFormatter={(v: number) => (metric === 'latency' ? `${Math.round(v)}` : metric === 'completion' ? `${v}%` : String(v))} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} width={44} domain={metric === 'score' ? [0, 1] : metric === 'completion' ? [0, 100] : metric === 'latency' ? [0, 'auto'] : [0, 5]} />
-            <Tooltip cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={fmt} />} />
+            <Tooltip animationDuration={160} animationEasing="ease-out" cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={fmt} />} />
             {metric === 'score' ? <ReferenceLine y={floor} stroke="#c0262d" strokeDasharray="4 4" label={{ value: `exclusion floor ${floor.toFixed(2)}`, position: 'right', fontSize: 11, fill: '#c0262d' }} /> : null}
-            <Bar dataKey="value" name={metric[0].toUpperCase() + metric.slice(1)} radius={[6, 6, 0, 0]} isAnimationActive={!reduce} animationDuration={600}>
+            <Bar dataKey="value" name={metric[0].toUpperCase() + metric.slice(1)} radius={[6, 6, 0, 0]} isAnimationActive={!reduce} animationDuration={750} animationEasing="ease-out">
               {data.map((d) => <Cell key={d.name} fill={d.color} />)}
             </Bar>
           </BarChart>
@@ -250,10 +248,9 @@ function Comparison({ models, perModel, floor }: { models: ModelInfo[]; perModel
 }
 
 function Heatmap({ models, results }: { models: ModelInfo[]; results: TestResult[] }) {
-  const [by, setBy] = useState<'useCase' | 'language' | 'turnType'>('useCase');
+  const [by, setBy] = useState<'useCase' | 'turnType'>('useCase');
   const cols =
     by === 'useCase' ? USE_CASES.map((u) => ({ key: u.value, label: u.label }))
-    : by === 'language' ? LANGS.map((l) => ({ key: l.value, label: l.label }))
     : [{ key: 'simple', label: 'Simple' }, { key: 'complex', label: 'Complex' }];
   const cell = useMemo(() => {
     const map = new Map<string, number[]>();
@@ -264,7 +261,7 @@ function Heatmap({ models, results }: { models: ModelInfo[]; results: TestResult
     return map;
   }, [results, by]);
   return (
-    <Card title="Quality heatmap" subtitle="Average case score. Darker is better; hover or focus a cell for details." right={<Segmented size="sm" label="Group by" value={by} onChange={setBy} options={[{ value: 'useCase', label: 'Call type' }, { value: 'language', label: 'Language' }, { value: 'turnType', label: 'Turn type' }]} />}>
+    <Card title="Quality heatmap" subtitle="Average case score. Darker is better; hover or focus a cell for details." right={<Segmented size="sm" label="Group by" value={by} onChange={setBy} options={[{ value: 'useCase', label: 'Call type' }, { value: 'turnType', label: 'Turn type' }]} />}>
       <div className="scroll-x">
         <table className="w-full min-w-[520px] table-fixed border-separate border-spacing-1 text-[12px]">
           <thead>
@@ -348,7 +345,11 @@ function Conversations({ models, perModel, cases }: { models: ModelInfo[]; perMo
             <li key={r.caseId}>
               <button type="button" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.caseId)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 py-3 text-left">
                 <motion.span animate={{ rotate: isOpen ? 0 : -90 }} transition={base} className="text-ink-3"><ChevronDown size={15} aria-hidden="true" /></motion.span>
-                <span className="min-w-[140px] flex-1 text-[13.5px] font-medium">{USE_CASES.find((u) => u.value === r.useCase)?.label} · {r.language.toUpperCase()}</span>
+                {/* The call type alone repeats (each type has a simple and a complex case), so the message identifies the row. */}
+                <span className="min-w-0 flex-1 basis-[220px] truncate text-[13.5px]">
+                  <span className="font-medium text-ink">{USE_CASES.find((u) => u.value === r.useCase)?.label}</span>
+                  {c ? <span className="text-ink-3"> · {c.message}</span> : null}
+                </span>
                 <TurnBadge turnType={r.turnType} />
                 <Status kind={r.completed ? 'ok' : 'fail'} label={r.completed ? 'Completed' : 'Not completed'} />
                 <span className="w-12 text-right font-mono text-[13px] tabular-nums">{r.score.toFixed(2)}</span>
@@ -357,9 +358,9 @@ function Conversations({ models, perModel, cases }: { models: ModelInfo[]; perMo
                 {isOpen && (
                   <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={base} className="overflow-hidden">
                     <div className="mb-3 ml-7 grid gap-3 rounded-2xl bg-canvas p-4 text-[13px] ring-1 ring-line sm:grid-cols-2">
-                      <div><div className="label mb-1">Customer</div><p className="text-ink">{c?.message}</p></div>
+                      <div><div className="label mb-1">Customer</div><p className="text-ink [overflow-wrap:anywhere]">{c?.message}</p></div>
                       <div><div className="label mb-1">Expected outcome</div><p className="text-ink">{c?.expected}</p></div>
-                      <div className="sm:col-span-2"><div className="label mb-1">Reply</div><p className="text-ink-2">{r.reply === '(simulated reply)' ? 'Demo mode: the simulated judge scores from the model’s quality setting, without generating a reply.' : r.reply}</p></div>
+                      <div className="sm:col-span-2"><div className="label mb-1">Reply</div><p className="text-ink-2">{r.reply === '(simulated reply)' ? 'Sample data: scored from the model’s quality setting, without generating a reply.' : r.reply}</p></div>
                       <div className="flex flex-wrap gap-4 font-mono text-[12px] text-ink-2 sm:col-span-2">
                         <span>accuracy {r.accuracy.toFixed(1)}/5</span><span>tone {r.tone.toFixed(1)}/5</span><span>{ms(r.latencyMs)}</span><span>score {r.score.toFixed(3)}</span>
                       </div>
@@ -396,7 +397,7 @@ function History({ runs, models }: { runs: TestRun[]; models: ModelInfo[] }) {
                 <tr key={r.id} className="border-b border-line/70">
                   <td className="py-2 font-medium">#{r.id}</td>
                   <td className="py-2 text-ink-2">{timeAgo(r.ts)}</td>
-                  <td className="py-2">{r.mode === 'demo' ? <SimulatedTag>Simulated</SimulatedTag> : <SimulatedTag>Live</SimulatedTag>}</td>
+                  <td className="py-2 text-ink-2">{r.mode === 'demo' ? 'Simulated' : 'Live model'}</td>
                   <td className="py-2 text-right font-mono tabular-nums">{avg(Object.values(r.scores)).toFixed(3)}</td>
                   <td className="py-2 pl-4">{best ? `${modelName(models, best[0])} (${score(best[1])})` : '—'}</td>
                 </tr>

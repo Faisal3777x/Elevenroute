@@ -14,6 +14,8 @@ export interface CallInput {
   simulated: boolean;
   /** Don't actually wait: compute latency only (synthetic traffic, tests). */
   virtual: boolean;
+  /** ElevenAgent: the simulated provider returns this reply and is billed for the extra context tokens. */
+  script?: { reply: string; contextTokens: number };
 }
 
 export interface CallResult {
@@ -34,9 +36,10 @@ export class ProviderError extends Error {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const jitter = (base: number, spread = 0.3) => base * (1 - spread + Math.random() * spread * 2);
 
-export function estimateTokens(text: string, language: Language): number {
+/** About 1.4 tokens per English word. */
+export function estimateTokens(text: string): number {
   const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.round(words * (language === 'es' ? 1.6 : 1.4)));
+  return Math.max(1, Math.round(words * 1.4));
 }
 
 export function costOf(m: ModelInfo, tokensIn: number, tokensOut: number): number {
@@ -87,11 +90,11 @@ export async function callModel(input: CallInput, mode: 'demo' | 'live'): Promis
     throw new ProviderError(`timed out after ${budgetMs} ms`, budgetMs);
   }
   if (!virtual) await sleep(latency);
-  const reply = cannedReply(input.message, input.useCase, input.language, input.turnType);
+  const reply = input.script?.reply ?? cannedReply(input.message, input.useCase, input.language, input.turnType);
   return {
     reply,
-    tokensIn: SYSTEM_TOKENS + estimateTokens(input.message, input.language),
-    tokensOut: estimateTokens(reply, input.language),
+    tokensIn: SYSTEM_TOKENS + (input.script?.contextTokens ?? 0) + estimateTokens(input.message),
+    tokensOut: estimateTokens(reply),
     latencyMs: latency,
   };
 }

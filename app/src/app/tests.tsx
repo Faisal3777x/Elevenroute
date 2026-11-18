@@ -9,7 +9,7 @@ import {
 } from '@/components/ui';
 import { C, F, S, modelColor } from '@/constants/theme';
 import { api } from '@/lib/api';
-import { LANGS, USE_CASES, modelName, ms, score, timeAgo } from '@/lib/format';
+import { USE_CASES, modelName, ms, score, timeAgo } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
 
 import type { Alert, ModelInfo, RoutingConfig, TestResult, TestRun } from '../../../shared/types';
@@ -24,7 +24,7 @@ export default function TestsScreen() {
   const routing = useApi<RoutingConfig>('/routing');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [by, setBy] = useState<'useCase' | 'language'>('useCase');
+  const [by, setBy] = useState<'useCase' | 'turnType'>('useCase');
   const [selected, setSelected] = useState<string | null>(null);
 
   const run = async () => {
@@ -42,11 +42,11 @@ export default function TestsScreen() {
 
   const floor = routing.data?.strategy.exclusionFloor ?? 0.7;
   const scored = (models.data ?? []).filter((m) => m.testScore !== null).sort((a, b) => (b.testScore ?? 0) - (a.testScore ?? 0));
-  const cols = by === 'useCase' ? USE_CASES.map((u) => ({ key: u.value, label: u.label })) : LANGS.map((l) => ({ key: l.value, label: l.label }));
+  const cols = by === 'useCase' ? USE_CASES.map((u) => ({ key: u.value, label: u.label })) : [{ key: 'simple', label: 'Simple' }, { key: 'complex', label: 'Complex' }];
   const heat = useMemo(() => {
     const map = new Map<string, number[]>();
     for (const r of results.data ?? []) {
-      const k = `${r.modelId}|${by === 'useCase' ? r.useCase : r.language}`;
+      const k = `${r.modelId}|${by === 'useCase' ? r.useCase : r.turnType}`;
       map.set(k, [...(map.get(k) ?? []), r.score]);
     }
     return map;
@@ -57,7 +57,7 @@ export default function TestsScreen() {
   return (
     <Screen
       title="Test results"
-      subtitle="24 conversations · 6 call types × 2 languages × simple and complex. Every model, same tests."
+      subtitle="12 conversations · 6 call types × simple and complex. Every model, same tests."
       onRefresh={results.reload}
       actions={<Pill label="Run tests" icon="check" onPress={run} loading={running} />}>
       {models.error && !models.data ? <ApiErrorNote error={models.error} onRetry={models.reload} /> : null}
@@ -106,7 +106,7 @@ export default function TestsScreen() {
 
           <Card
             title="Heatmap"
-            right={<Segmented small value={by} onChange={setBy} options={[{ value: 'useCase', label: 'Call type' }, { value: 'language', label: 'Language' }]} />}>
+            right={<Segmented small value={by} onChange={setBy} options={[{ value: 'useCase', label: 'Call type' }, { value: 'turnType', label: 'Turn type' }]} />}>
             <ScrollView horizontal>
               <View style={{ gap: 4 }}>
                 <Row gap={4}>

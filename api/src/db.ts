@@ -68,6 +68,8 @@ const driver = process.env.DATABASE_URL
 export const db = driver.sql;
 export const backend = driver.backend;
 export const closeDb = () => driver.close();
+/** Runs a SQL script of several statements, as migrations do (tests use it to re-run a migration over old data). */
+export const execSql = (text: string) => driver.exec(text);
 
 /** Applies api/migrations/*.sql once each, in order. `*.supabase.sql` files run only on Supabase. */
 async function migrate(): Promise<void> {

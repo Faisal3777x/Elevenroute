@@ -28,7 +28,7 @@ const storage = (() => {
 export const persister = createSyncStoragePersister({ storage, key: 'elevenroute-cache', throttleTime: 1000 });
 
 /** Bump to drop caches written by older builds whose data shapes may differ. */
-export const CACHE_BUSTER = 'v1';
+export const CACHE_BUSTER = 'v2'; // v2: Spanish removed, so cached Spanish test cases and traffic are dropped
 export const CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
 
 export function clearCache(): void {

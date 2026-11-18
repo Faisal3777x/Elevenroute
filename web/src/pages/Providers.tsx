@@ -6,11 +6,11 @@ import type { ModelInfo, PreviewResponse, RoutingConfig, TestCase, Vendor, Vendo
 import { FlowArrow } from '../components/Flow';
 import { Modal } from '../components/Modal';
 import { Orb } from '../components/Orb';
-import { Button, Card, ErrorNote, Field, Page, PageHeader, Segmented, SimulatedTag, Skeleton, Status, Toggle, TurnBadge } from '../components/ui';
+import { Button, Card, ErrorNote, Field, Page, PageHeader, Segmented, Skeleton, Status, Toggle, TurnBadge } from '../components/ui';
 import { useVendors } from '../components/VendorControls';
 import { api } from '../lib/api';
-import { money, ms, score } from '../lib/format';
-import { base, fadeUp } from '../lib/motion';
+import { LANGS, money, ms, score } from '../lib/format';
+import { base, EASE } from '../lib/motion';
 import { modelColor, VENDOR_NAMES, VENDOR_ORDER } from '../lib/theme';
 import { useApi } from '../lib/useApi';
 
@@ -78,7 +78,7 @@ export default function Providers() {
             const list = models.data!.filter((m) => m.vendor === vendor).sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'flagship' ? -1 : 1));
             if (!v) return null;
             return (
-              <motion.section key={vendor} variants={fadeUp} className="card overflow-hidden">
+              <section key={vendor} className="card overflow-hidden">
                 <div className={`flex flex-wrap items-center justify-between gap-4 border-b px-5 py-4 transition-colors duration-300 sm:px-6 ${v.state === 'down' ? 'border-bad/20 bg-bad/[0.035]' : v.state === 'slow' ? 'border-warn/20 bg-warn/[0.04]' : 'border-line'}`}>
                   <div className="flex flex-wrap items-center gap-3">
                     <Orb model={{ vendor, tier: 'flagship' }} size={40} live={v.state} ping />
@@ -88,7 +88,7 @@ export default function Providers() {
                         <Status kind={v.state} label={v.state === 'healthy' ? 'Healthy' : v.state === 'down' ? 'Down (simulated)' : 'Slow (simulated)'} />
                         {v.breakerOpen ? <Status kind="warn" label="Circuit breaker open" /> : <span className="text-[12px] text-ink-3">Breaker closed</span>}
                         <span className={`inline-flex items-center gap-1 text-[12px] ${v.hasKey ? 'text-ok' : 'text-ink-3'}`}>
-                          <KeyRound size={12} aria-hidden="true" /> {v.hasKey ? 'API key present' : 'No API key (demo only)'}
+                          <KeyRound size={12} aria-hidden="true" /> {v.hasKey ? 'API key present' : 'No API key: simulated'}
                         </span>
                       </div>
                     </div>
@@ -98,12 +98,12 @@ export default function Providers() {
                 <div className="grid grid-cols-1 gap-px bg-line md:grid-cols-2">
                   {list.map((m) => <ModelTile key={m.id} model={m} floor={floor} vendorState={v.state} onToggle={(enabled) => patch(m.id, { enabled })} onEdit={() => setEditing(m)} />)}
                 </div>
-              </motion.section>
+              </section>
             );
           })
         : null}
 
-      <p className="text-[12.5px] text-ink-3">Demo prices, latencies and quality estimates are illustrative simulation settings, not vendor quotes. A simulated outage is a test switch and never a real provider incident.</p>
+      <p className="text-[12.5px] text-ink-3">Sample prices, latencies and quality estimates are illustrative settings, not vendor quotes. An outage set here is a test switch, never a real provider incident.</p>
 
       <EditModal model={editing} onClose={() => setEditing(null)} onSave={async (b) => { if (editing) await patch(editing.id, b); setEditing(null); }} onDelete={async () => {
         if (!editing) return;
@@ -126,8 +126,8 @@ function ModelTile({ model: m, floor, vendorState, onToggle, onEdit }: { model: 
         <div className="flex min-w-0 items-center gap-3">
           <Orb model={m} size={34} live={life} />
           <div className="min-w-0">
-            <div className="truncate text-[15.5px] font-medium">{m.name}</div>
-            <div className="text-[12.5px] text-ink-3 capitalize">{m.tier} · {m.regions.join(', ')} · {m.languages.map((l) => l.toUpperCase()).join(', ')}</div>
+            <div className="text-[15.5px] font-medium text-pretty [overflow-wrap:anywhere]">{m.name}</div>
+            <div className="text-[12.5px] text-ink-3 capitalize">{m.tier} · {m.regions.join(', ')}{LANGS.length > 1 ? ` · ${m.languages.map((l) => l.toUpperCase()).join(', ')}` : ''}</div>
           </div>
         </div>
         {m.excluded ? <Status kind="excluded" /> : !m.enabled ? <Status kind="fail" label="Disabled" /> : vendorDown ? <Status kind="warn" label="Failing over" /> : <Status kind="ok" label="In routing" />}
@@ -143,12 +143,12 @@ function ModelTile({ model: m, floor, vendorState, onToggle, onEdit }: { model: 
       </dl>
 
       <div>
-        <div className="mb-1 flex justify-between text-[11.5px] text-ink-3">
+        <div className="mb-1 flex flex-wrap justify-between gap-x-3 text-[11.5px] text-ink-3">
           <span>Latest test score vs exclusion floor ({floor.toFixed(2)})</span>
           <span>{m.testScore === null ? 'not tested yet' : score(m.testScore)}</span>
         </div>
         <div className="relative h-2 rounded-full bg-line">
-          <motion.div className="h-full rounded-full" style={{ background: modelColor(m) }} initial={{ width: 0 }} animate={{ width: `${(m.testScore ?? 0) * 100}%` }} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }} />
+          <motion.div className="h-full origin-left rounded-full" style={{ background: modelColor(m) }} initial={{ scaleX: 0 }} animate={{ scaleX: Math.min(1, Math.max(0, m.testScore ?? 0)) }} transition={{ duration: 0.5, ease: EASE }} />
           <span className="absolute -top-1 h-4 w-0.5 rounded bg-ink" style={{ left: `${floor * 100}%` }} aria-hidden="true" />
         </div>
       </div>
@@ -199,10 +199,10 @@ function TrafficRedirect({ states, models, budgetMs }: { states: Record<Vendor, 
 
   const name = (id?: string) => models.find((m) => m.id === id)?.name ?? 'Human handoff';
   return (
-    <Card title="Traffic redirect during the simulated outage" right={<SimulatedTag>Simulated outage</SimulatedTag>} subtitle="Default customer, English. Derived from the router’s current ranking and its failover rule (next model from a healthy vendor).">
+    <Card title="Traffic redirect during the simulated outage" subtitle="Default customer. Derived from the router’s current ranking and its failover rule (next model from a healthy vendor).">
       <div className="flex flex-col gap-3">
         {rows.map((r) => (
-          <motion.div layout key={r.label} className="flex flex-wrap items-center gap-3 rounded-2xl bg-canvas px-4 py-3 ring-1 ring-line">
+          <motion.div key={r.label} className="flex flex-wrap items-center gap-3 rounded-2xl bg-canvas px-4 py-3 ring-1 ring-line">
             <TurnBadge turnType={r.label} />
             <span className="flex items-center gap-1.5 text-[14px]">
               <Orb model={models.find((m) => m.id === r.from)} size={16} />

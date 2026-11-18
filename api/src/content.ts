@@ -15,7 +15,7 @@ interface UseCaseContent {
 }
 
 export const USE_CASES: UseCase[] = ['appointment', 'refund', 'order_status', 'insurance', 'complaint', 'faq'];
-export const LANGUAGES: Language[] = ['en', 'es'];
+export const LANGUAGES: Language[] = ['en'];
 
 export const CONTENT: Record<UseCase, UseCaseContent> = {
   appointment: {
@@ -28,12 +28,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         complex: 'I need to move my appointment, but I can only come after work on weekdays, and my daughter also needs a check-up. Can we book both together? Which doctor is free?',
         replySimple: "Done — you're booked for 3:00 pm tomorrow. You'll get a text reminder an hour before.",
         replyComplex: 'I can help with both. Dr. Patel has two back-to-back slots on Thursday from 5:30 pm, so you and your daughter can come together. Shall I hold them while you confirm?',
-      },
-      es: {
-        simple: 'Sí, mañana a las 3pm está bien.',
-        complex: 'Necesito cambiar mi cita porque trabajo hasta tarde entre semana, y mi hija también necesita una revisión. ¿Podemos reservar las dos juntas? ¿Qué doctor está disponible?',
-        replySimple: 'Listo, su cita está reservada para mañana a las 3:00 pm. Recibirá un recordatorio una hora antes.',
-        replyComplex: 'Puedo ayudarle con ambas. La Dra. Patel tiene dos citas seguidas el jueves desde las 5:30 pm, así que pueden venir juntas. ¿Quiere que las reserve mientras confirma?',
       },
     },
   },
@@ -48,12 +42,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         replySimple: 'Thanks — I found order 48213. What would you like to do with it?',
         replyComplex: "I'm sorry about the double charge. I can see both payments on order 48213 and I've opened a refund for the duplicate. It will be back on your card within 3–5 business days, and you'll get a confirmation email shortly.",
       },
-      es: {
-        simple: 'Mi número de pedido es 48213.',
-        complex: 'Me cobraron dos veces el mismo pedido y el segundo cargo todavía no se ha devuelto. Quiero un reembolso del cobro duplicado hoy. ¿Quién lo aprueba?',
-        replySimple: 'Gracias, encontré el pedido 48213. ¿Qué desea hacer con él?',
-        replyComplex: 'Lamento el cobro doble. Veo ambos pagos en el pedido 48213 y ya abrí el reembolso del duplicado. Volverá a su tarjeta en 3 a 5 días hábiles y recibirá un correo de confirmación.',
-      },
     },
   },
   order_status: {
@@ -66,12 +54,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         complex: "My package was supposed to arrive on Monday, the tracking page hasn't updated in four days, and I'm travelling on Friday. Can you check where it is? Can it be redirected to my office?",
         replySimple: 'Order 55120 is out for delivery and should arrive by 6 pm today.',
         replyComplex: "Your package is at our regional hub — a scanner fault stopped the tracking updates. I've redirected it to your office address with priority delivery, so it will arrive Thursday, before your trip.",
-      },
-      es: {
-        simple: '¿Dónde está el pedido 55120?',
-        complex: 'Mi paquete debía llegar el lunes, la página de seguimiento no se actualiza desde hace cuatro días y viajo el viernes. ¿Pueden revisar dónde está? ¿Se puede enviar a mi oficina?',
-        replySimple: 'El pedido 55120 está en reparto y debería llegar hoy antes de las 6 pm.',
-        replyComplex: 'Su paquete está en nuestro centro regional; una falla del escáner detuvo las actualizaciones. Lo redirigí a su oficina con entrega prioritaria, así que llegará el jueves, antes de su viaje.',
       },
     },
   },
@@ -86,12 +68,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         replySimple: 'Done — your policy is renewed for another 12 months at the same premium.',
         replyComplex: 'I can update all of that in one go. With the new car and city your premium goes from $84 to $91 a month, and adding your partner as a named driver adds $12. Shall I apply these changes with the renewal?',
       },
-      es: {
-        simple: 'Sí, renuévela, gracias.',
-        complex: 'Mi póliza se renueva el próximo mes, pero compré un coche nuevo y me mudé a otra ciudad. ¿Cambiará mi prima? ¿Puedo añadir a mi pareja como segunda conductora al mismo tiempo?',
-        replySimple: 'Listo, su póliza quedó renovada por 12 meses más con la misma prima.',
-        replyComplex: 'Puedo actualizar todo a la vez. Con el coche nuevo y la nueva ciudad su prima pasa de 84 a 91 dólares al mes, y añadir a su pareja como conductora suma 12 dólares. ¿Aplico estos cambios con la renovación?',
-      },
     },
   },
   complaint: {
@@ -104,12 +80,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         complex: 'This is the third time your technician missed the appointment window and nobody called me. I took a day off work for nothing. This is unacceptable and I want to file a formal complaint.',
         replySimple: "You're welcome. Is there anything else I can help with?",
         replyComplex: "I'm truly sorry — missing three visits without a call isn't acceptable. I've filed a formal complaint (reference C-2291), added a $50 credit for your lost day, and booked a guaranteed 8–10 am slot with a senior technician. A supervisor will call you within 24 hours.",
-      },
-      es: {
-        simple: 'Vale, gracias.',
-        complex: 'Es la tercera vez que su técnico no llega en el horario acordado y nadie me llamó. Perdí un día de trabajo para nada. Esto es inaceptable y quiero poner una queja formal.',
-        replySimple: 'De nada. ¿Hay algo más en lo que pueda ayudarle?',
-        replyComplex: 'Lo siento mucho: faltar tres veces sin avisar no es aceptable. Registré una queja formal (referencia C-2291), añadí un crédito de 50 dólares por el día perdido y reservé un horario garantizado de 8 a 10 am con un técnico sénior. Un supervisor le llamará en 24 horas.',
       },
     },
   },
@@ -124,12 +94,6 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
         replySimple: "We're open from 8 am to 8 pm, Monday to Saturday.",
         replyComplex: 'Premium includes 24/7 support; Basic covers 9 am–6 pm on weekdays. Both include the analytics dashboard, but data export is Premium only. With three locations, Premium also gives you one admin view across all of them.',
       },
-      es: {
-        simple: '¿A qué hora abren?',
-        complex: 'Estoy comparando sus planes premium y básico para un pequeño negocio con tres sucursales. ¿Cuál es la diferencia en horario de soporte? ¿Ambos incluyen el panel de análisis y la exportación de datos?',
-        replySimple: 'Abrimos de 8 am a 8 pm, de lunes a sábado.',
-        replyComplex: 'Premium incluye soporte 24/7; Básico cubre de 9 am a 6 pm entre semana. Ambos incluyen el panel de análisis, pero la exportación de datos es solo de Premium. Con tres sucursales, Premium también le da una vista de administración conjunta.',
-      },
     },
   },
 };
@@ -137,20 +101,17 @@ export const CONTENT: Record<UseCase, UseCaseContent> = {
 /** Short follow-up turns used by synthetic traffic. */
 export const FOLLOW_UPS: Record<Language, string[]> = {
   en: ['Yes, that works.', 'Okay, thanks!', "It's 48213.", '3pm is fine.'],
-  es: ['Sí, gracias.', 'Vale, perfecto.', 'Es el 48213.', 'Mañana a las 3pm.'],
 };
 
 const GENERIC: Record<Language, string> = {
   en: "Great — that's all set. Anything else I can help with?",
-  es: 'Perfecto, ya está listo. ¿Algo más en lo que pueda ayudarle?',
 };
 
 export const APOLOGY: Record<Language, string> = {
   en: "Sorry, I'm having trouble right now. Let me connect you to a member of our team.",
-  es: 'Lo siento, tengo problemas en este momento. Le paso con una persona de nuestro equipo.',
 };
 
-export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English', es: 'Spanish' };
+export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English' };
 
 /** Canned demo reply for a turn. */
 export function cannedReply(message: string, useCase: UseCase, language: Language, turnType: TurnType): string {

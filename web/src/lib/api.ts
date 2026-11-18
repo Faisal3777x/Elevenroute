@@ -11,7 +11,7 @@ export const API_BASE =
 
 export class ApiError extends Error {}
 
-const READ_ONLY_POSTS = new Set(['/route/preview', '/whatif/simulate']);
+const READ_ONLY_POSTS = new Set(['/route/preview', '/whatif/simulate', '/agent/preview']);
 
 async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const token = await accessToken();

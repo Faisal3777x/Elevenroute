@@ -1,8 +1,7 @@
 import { TrendingDown, TrendingUp } from 'lucide-react';
-import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 
-import { fadeUp, spring } from '../lib/motion';
+import { spotlight } from '../lib/spotlight';
 import { AnimatedNumber } from './AnimatedNumber';
 import { InfoTip } from './Tooltip';
 
@@ -22,11 +21,8 @@ export function Kpi({ label, value, format, hint, info, trend, goodWhen = 'down'
   emphasis?: boolean;
 }) {
   return (
-    <motion.div
-      variants={fadeUp}
-      whileHover={{ y: -2 }}
-      transition={spring}
-      className={`card flex min-w-0 flex-col gap-1.5 p-4 transition-shadow duration-300 hover:shadow-[var(--shadow-lift)] sm:p-5 ${emphasis ? 'bg-ink text-white' : ''}`}>
+    // A light follows the mouse (spotlight); the KPI grid around it brings the cards in one by one (cascade).
+    <div {...spotlight(`card flex min-w-0 flex-col gap-1.5 p-4 sm:p-5 ${emphasis ? 'bg-ink text-white' : ''}`)}>
       <div className="flex items-center justify-between gap-2">
         <span className={`text-xs font-medium ${emphasis ? 'text-white/70' : 'text-ink-2'}`}>{label}</span>
         <span className="flex items-center gap-1">
@@ -39,7 +35,7 @@ export function Kpi({ label, value, format, hint, info, trend, goodWhen = 'down'
         {trend !== null && trend !== undefined ? <Trend value={trend} goodWhen={goodWhen} dark={emphasis} /> : null}
         {hint ? <span className={`text-[12.5px] ${emphasis ? 'text-white/65' : 'text-ink-3'}`}>{hint}</span> : null}
       </div>
-    </motion.div>
+    </div>
   );
 }
 

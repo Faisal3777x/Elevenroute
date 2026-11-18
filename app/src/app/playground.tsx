@@ -8,7 +8,7 @@ import { ApiErrorNote, Body, Card, Chip, Label, Mono, Muted, Pill, Row, Segmente
 import { VendorSwitches } from '@/components/vendor-switches';
 import { C, F, MAX_WIDTH, RADIUS, S } from '@/constants/theme';
 import { api } from '@/lib/api';
-import { LANGS, USE_CASES, modelName, money, ms } from '@/lib/format';
+import { USE_CASES, modelName, money, ms } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
 
 import type { ChatResponse, Language, ModelInfo, RoutingConfig, TestCase, UseCase } from '../../../shared/types';
@@ -24,7 +24,7 @@ export default function PlaygroundScreen() {
   const models = useApi<ModelInfo[]>('/providers');
   const cases = useApi<TestCase[]>('/tests/cases');
   const [customer, setCustomer] = useState('default');
-  const [language, setLanguage] = useState<Language>('en');
+  const language: Language = 'en';
   const [useCase, setUseCase] = useState<UseCase>('refund');
   const [conversationId, setConversationId] = useState(newId);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -63,10 +63,6 @@ export default function PlaygroundScreen() {
         <View style={{ gap: 6 }}>
           <Label>Customer</Label>
           <Segmented small value={customer} onChange={setCustomer} options={(routing.data?.policies ?? [{ id: 'default', name: 'Default' }]).map((p) => ({ value: p.id, label: p.name }))} />
-        </View>
-        <View style={{ gap: 6 }}>
-          <Label>Language</Label>
-          <Segmented small value={language} onChange={setLanguage} options={LANGS} />
         </View>
         <View style={{ gap: 6 }}>
           <Label>Call type</Label>
@@ -145,7 +141,7 @@ export default function PlaygroundScreen() {
               value={input}
               onChangeText={setInput}
               onSubmitEditing={() => send()}
-              placeholder={language === 'es' ? 'Escribe un mensaje…' : 'Type a customer message…'}
+              placeholder="Type a customer message…"
               placeholderTextColor={C.ink3}
               returnKeyType="send"
               style={styles.input}

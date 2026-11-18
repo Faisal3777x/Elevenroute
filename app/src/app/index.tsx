@@ -89,7 +89,7 @@ export default function OverviewScreen() {
       {s && s.requests === 0 ? (
         <Empty
           title="No traffic yet"
-          body="Generate 500 synthetic conversations across every call type, language and customer, including two replayed provider incidents. It uses simulated providers, so it never spends API credit."
+          body="Generate 500 synthetic conversations across every call type and customer, including two replayed provider incidents. It uses simulated providers, so it never spends API credit."
           action={<Pill label="Generate traffic" icon="bolt" onPress={generate} loading={generating} />}
         />
       ) : null}
@@ -136,7 +136,7 @@ export default function OverviewScreen() {
                     <Status kind={f.reason === 'timeout' ? 'slow' : 'down'} label={f.reason === 'timeout' ? 'Timeout' : 'Error'} />
                     <View style={{ flex: 1 }}>
                       <Body style={{ fontSize: 14 }}>{modelName(ms_, f.from)} → {modelName(ms_, f.to)}</Body>
-                      <Muted>{timeAgo(f.ts)} · {f.language.toUpperCase()}</Muted>
+                      <Muted>{timeAgo(f.ts)}</Muted>
                     </View>
                   </Row>
                 ))}

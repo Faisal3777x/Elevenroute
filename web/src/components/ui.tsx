@@ -2,50 +2,56 @@ import {
   Check, Clock, Feather, Layers, LoaderCircle, RotateCcw, TriangleExclamationPoint, X, type LucideIcon,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { useEffect, useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 
 import type { TurnType, VendorState } from '../../../shared/types';
-import { fadeUp, fast, spring, stagger } from '../lib/motion';
+import { signed } from '../lib/format';
+import { useIndicator } from '../lib/indicator';
+import { fast, spring } from '../lib/motion';
+
+/** True once `flag` has stayed true for `ms`; false again at once. Keeps quick operations from flashing a spinner. */
+function useDelayed(flag: boolean, ms: number) {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!flag) return setLate(false);
+    const t = setTimeout(() => setLate(true), ms);
+    return () => clearTimeout(t);
+  }, [flag, ms]);
+  return flag && late;
+}
 
 // ---------- layout ----------
 export function PageHeader({ title, subtitle, actions, eyebrow }: { title: string; subtitle?: ReactNode; actions?: ReactNode; eyebrow?: ReactNode }) {
   return (
-    <motion.header variants={fadeUp} className="flex flex-wrap items-end justify-between gap-4">
+    <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0 max-w-2xl">
         {eyebrow ? <div className="mb-2">{eyebrow}</div> : null}
-        <h1 className="h-display text-[34px] leading-[1.1] sm:text-[42px]">{title}</h1>
+        <h1 className="h-display text-[34px] leading-[1.1] tracking-[-0.025em] sm:text-[42px]">{title}</h1>
         {subtitle ? <p className="mt-2 text-[15px] leading-relaxed text-ink-2">{subtitle}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
-    </motion.header>
+    </header>
   );
 }
 
-/** Page body: children enter with a short stagger. */
+/**
+ * Page body. Its sections rise in as one quick wave when the page opens (`.page-enter` in index.css, compositor-only),
+ * and content that arrives later rises in the same way. Mark a grid `cascade` to bring its cards in one by one.
+ */
 export function Page({ children }: { children: ReactNode }) {
-  return (
-    <motion.div variants={stagger} initial="hidden" animate="show" className="mx-auto flex w-full max-w-[1200px] flex-col gap-5">
-      {children}
-    </motion.div>
-  );
+  return <div className="page-enter mx-auto flex w-full max-w-[1200px] flex-col gap-5">{children}</div>;
 }
 
-export function Card({ title, subtitle, right, children, className = '', interactive = false, id }: {
+export function Card({ title, subtitle, right, children, className = '', id }: {
   title?: ReactNode;
   subtitle?: ReactNode;
   right?: ReactNode;
   children?: ReactNode;
   className?: string;
-  interactive?: boolean;
   id?: string;
 }) {
   return (
-    <motion.section
-      id={id}
-      variants={fadeUp}
-      whileHover={interactive ? { y: -2 } : undefined}
-      transition={spring}
-      className={`card p-5 sm:p-6 ${interactive ? 'transition-shadow duration-300 hover:shadow-[var(--shadow-lift)]' : ''} ${className}`}>
+    <section id={id} className={`card p-5 sm:p-6 ${className}`}>
       {title || right ? (
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -56,7 +62,7 @@ export function Card({ title, subtitle, right, children, className = '', interac
         </div>
       ) : null}
       {children}
-    </motion.section>
+    </section>
   );
 }
 
@@ -69,6 +75,7 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onDrag' | 'onD
 };
 
 export function Button({ variant = 'primary', size = 'md', icon: Icon, loading, children, className = '', disabled, ...props }: ButtonProps) {
+  const slow = useDelayed(Boolean(loading), 200);
   const styles = {
     primary: 'bg-ink text-white hover:bg-ink/90 shadow-[0_1px_2px_rgb(0_0_0/0.1)]',
     secondary: 'bg-canvas text-ink border border-line hover:border-ink/20 hover:bg-white',
@@ -82,9 +89,9 @@ export function Button({ variant = 'primary', size = 'md', icon: Icon, loading, 
       transition={spring}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${styles} ${sizing} ${className}`}
+      className={`group inline-flex shrink-0 items-center justify-center rounded-full font-medium transition-colors ${loading ? 'cursor-progress' : 'disabled:cursor-not-allowed disabled:opacity-45'} ${styles} ${sizing} ${className}`}
       {...props}>
-      {loading ? <LoaderCircle size={size === 'sm' ? 14 : 16} className="animate-spin" aria-hidden="true" /> : Icon ? <Icon size={size === 'sm' ? 14 : 16} aria-hidden="true" /> : null}
+      {slow ? <LoaderCircle size={size === 'sm' ? 14 : 16} className="animate-spin" aria-hidden="true" /> : Icon ? <Icon size={size === 'sm' ? 14 : 16} aria-hidden="true" className="transition-transform duration-300 ease-[var(--ease-spring)] group-hover:-rotate-6 group-hover:scale-110 group-disabled:rotate-0 group-disabled:scale-100" /> : null}
       {children}
     </motion.button>
   );
@@ -97,9 +104,11 @@ export function Segmented<T extends string | number>({ options, value, onChange,
   size?: 'sm' | 'md';
   label: string;
 }) {
-  const id = useId();
+  // The white pill slides to the chosen option on the compositor (see useIndicator).
+  const [group, pill] = useIndicator<HTMLDivElement>('[aria-checked="true"]', [value, options.length]);
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex w-fit max-w-full flex-wrap rounded-full bg-line/80 p-[3px]">
+    <div ref={group} role="radiogroup" aria-label={label} className="relative inline-flex w-fit max-w-full flex-wrap rounded-full bg-line/80 p-[3px]">
+      <span aria-hidden="true" className="pointer-events-none absolute top-0 left-0 rounded-full bg-canvas shadow-[0_1px_3px_rgb(0_0_0/0.08)]" style={pill} />
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -109,9 +118,8 @@ export function Segmented<T extends string | number>({ options, value, onChange,
             role="radio"
             aria-checked={active}
             onClick={() => onChange(o.value)}
-            className={`relative rounded-full font-medium transition-colors ${size === 'sm' ? 'px-3 py-1.5 text-[12.5px]' : 'px-4 py-2 text-[13.5px]'} ${active ? 'text-ink' : 'text-ink-2 hover:text-ink'}`}>
-            {active && <motion.span layoutId={`seg-${id}`} transition={spring} className="absolute inset-0 rounded-full bg-canvas shadow-[0_1px_3px_rgb(0_0_0/0.08)]" />}
-            <span className="relative">{o.label}</span>
+            className={`press relative rounded-full font-medium transition-colors ${size === 'sm' ? 'px-3 py-1.5 text-[12.5px]' : 'px-4 py-2 text-[13.5px]'} ${active ? 'text-ink' : 'text-ink-2 hover:text-ink'}`}>
+            {o.label}
           </button>
         );
       })}
@@ -139,7 +147,7 @@ export function Toggle({ checked, onChange, label, description }: { checked: boo
   return (
     <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className="flex items-start gap-3 rounded-xl text-left">
       <span className={`relative mt-0.5 inline-flex h-6 w-10 shrink-0 rounded-full p-[3px] transition-colors ${checked ? 'bg-ink' : 'bg-line'}`}>
-        <motion.span layout transition={spring} className={`h-[18px] w-[18px] rounded-full bg-white shadow ${checked ? 'ml-auto' : ''}`} />
+        <motion.span initial={false} animate={{ x: checked ? 16 : 0 }} transition={spring} className="h-[18px] w-[18px] rounded-full bg-white shadow" />
       </span>
       <span>
         <span className="block text-[14.5px] text-ink">{label}</span>
@@ -191,7 +199,7 @@ export function Status({ kind, label }: { kind: keyof typeof STATUS; label?: str
         key={`${kind}-${label ?? ''}`}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.9 }}
+        exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.12 } }}
         transition={fast}
         className={`inline-flex items-center gap-1 rounded-full border bg-canvas px-2.5 py-[3px] text-[12px] font-medium whitespace-nowrap ${s.cls}`}>
         <Icon size={12} strokeWidth={2.6} aria-hidden="true" />
@@ -209,13 +217,9 @@ export function TurnBadge({ turnType, score }: { turnType: TurnType; score?: num
     <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[12px] font-medium ${simple ? 'bg-violet/8 text-violet' : 'bg-ember/10 text-[#c2410c]'}`}>
       <Icon size={12} aria-hidden="true" />
       {simple ? 'Simple' : 'Complex'}
-      {score !== undefined ? <span className="opacity-70">· score {score}</span> : null}
+      {score !== undefined ? <span className="opacity-70">· score {signed(score)}</span> : null}
     </span>
   );
-}
-
-export function SimulatedTag({ children = 'Simulated' }: { children?: ReactNode }) {
-  return <span className="inline-flex items-center rounded-full border border-dashed border-ink/25 px-2 py-[2px] text-[11px] font-medium tracking-wide text-ink-2 uppercase">{children}</span>;
 }
 
 // ---------- feedback ----------
@@ -225,13 +229,13 @@ export function Skeleton({ className = '' }: { className?: string }) {
 
 export function ErrorNote({ error, onRetry }: { error: string; onRetry?: () => void }) {
   return (
-    <motion.div variants={fadeUp} role="alert" className="flex flex-wrap items-start gap-3 rounded-[20px] border border-bad/25 bg-bad/[0.04] p-4">
+    <div role="alert" className="flex flex-wrap items-start gap-3 rounded-[20px] border border-bad/25 bg-bad/[0.04] p-4">
       <TriangleExclamationPoint size={18} className="mt-0.5 text-bad" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <p className="text-[14.5px] font-medium text-ink">{error}</p>
       </div>
       {onRetry ? <Button size="sm" variant="secondary" icon={RotateCcw} onClick={onRetry}>Retry</Button> : null}
-    </motion.div>
+    </div>
   );
 }
 

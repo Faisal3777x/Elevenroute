@@ -1,4 +1,4 @@
-import type { Candidate, Classification, CustomerPolicy, Language, ModelInfo, UseCase, Vendor } from '../../shared/types.ts';
+import type { Candidate, Classification, CustomerPolicy, Language, ModelInfo, TurnType, UseCase, Vendor } from '../../shared/types.ts';
 import { Breaker } from './breaker.ts';
 import { classify } from './classifier.ts';
 import { blendedCost, hasKey, type Workspace } from './store.ts';
@@ -44,6 +44,18 @@ export function policyBlock(m: ModelInfo, policy: CustomerPolicy): string | null
   if (policy.allowedVendors && !policy.allowedVendors.includes(m.vendor)) return `${policy.name} policy excludes ${m.vendor}`;
   if (policy.region && !m.regions.includes(policy.region)) return `not hosted in ${policy.region}`;
   return null;
+}
+
+/**
+ * The single-model baseline: the highest-quality model this customer's policy allows for the language, judged by
+ * the same per-language, per-turn-type quality the router ranks complex turns by.
+ */
+export function bestAllowedModel(ws: Workspace, customerId: string, language: Language, turnType: TurnType): ModelInfo | undefined {
+  const policy = policyFor(ws, customerId);
+  const seg = `${language}:${turnType}`;
+  return ws.models
+    .filter((m) => m.enabled && !m.excluded && m.languages.includes(language) && !policyBlock(m, policy))
+    .sort((a, b) => ws.effectiveQuality(b, seg) - ws.effectiveQuality(a, seg))[0];
 }
 
 export function decide(ws: Workspace, input: DecideInput): Decision {

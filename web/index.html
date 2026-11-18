@@ -2,11 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover paints edge to edge (content pads itself from the notch with env(safe-area-inset-*));
+         resizes-content lets the phone keyboard shrink the layout so bottom inputs stay visible. Zoom stays allowed. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- The dashboard's canvas colour; the black landing page swaps it while it is open (Landing.tsx). -->
     <meta name="theme-color" content="#fdfcfc" />
     <meta name="description" content="ElevenRoute routes every AI conversation turn to the right model, fails over when providers break, and shows what it costs." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>ElevenRoute</title>
+    <!-- The landing page is black: paint it black before any script or stylesheet arrives, so it never flashes white
+         while loading. Landing.tsx keeps the class (and the status-bar colour) while it is open and removes both on leave. -->
+    <style>html.landing-dark, html.landing-dark body { background-color: #09090a; }</style>
+    <script>
+      if (location.pathname === '/') {
+        document.documentElement.classList.add('landing-dark');
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', '#09090a');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

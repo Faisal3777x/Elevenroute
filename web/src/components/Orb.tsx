@@ -1,15 +1,34 @@
-import { animate } from 'animejs';
-import { useId } from 'react';
+import { useEffect, useId, useRef, type CSSProperties } from 'react';
 
 import type { ModelInfo, VendorState } from '../../../shared/types';
-import { useAnime, usePhase } from '../lib/anime';
+import { usePhase } from '../lib/anime';
 import { EMBER, INK3, VENDOR_COLORS, VIOLET } from '../lib/theme';
 
 type OrbModel = Pick<ModelInfo, 'vendor' | 'tier'> | undefined;
 
+/** Custom properties set inline (React's CSSProperties type doesn't know them). */
+type OrbVars = CSSProperties & Record<`--orb-${string}`, string>;
+const ms = (n: number) => `${Math.round(n)}ms`;
+
+/**
+ * Pauses an orb's CSS loops while it is well off-screen, so a long page full of orbs lets the compositor rest.
+ * The loops themselves are CSS keyframes (index.css, "Living orbs"), so they never run JavaScript per frame.
+ */
+function useOffscreenPause<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([entry]) => el.toggleAttribute('data-orb-paused', !entry.isIntersecting), { rootMargin: '160px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return ref;
+}
+
 /**
  * Abstract gradient "orb" identifying a model by vendor and tier.
- * `live` makes it a living orb (anime.js): it drifts, breathes and its light turns.
+ * `live` makes it a living orb: it drifts, breathes and its light turns.
  * Pass the vendor's state so the motion tells the truth: slow providers move sluggishly, down ones stop and fade.
  * `ping` adds a heartbeat ring (use it once per provider, not on every model).
  */
@@ -56,37 +75,10 @@ const glowCircles = (id: string) => BRAND_GLOWS.map((_, i) => <circle key={i} cx
 export function BrandOrb({ size = 28, live = false, ping = false, drift = true, beat = false, outline = false, className = '' }: { size?: number; live?: boolean; ping?: boolean; drift?: boolean; beat?: boolean; outline?: boolean; className?: string }) {
   const id = useId().replace(/[^a-zA-Z0-9]/g, '');
   const phase = usePhase();
+  const root = useOffscreenPause<HTMLSpanElement>();
   // With an outline, the ball sits inside the ring with a small gap.
   const gap = outline ? Math.max(2, Math.round(size * 0.08)) : 0;
   const inner = size - gap * 2;
-  const root = useAnime<HTMLSpanElement>(() => {
-    if (!live) return;
-    const amp = Math.max(1.5, size * 0.08);
-    const common = { loop: true, alternate: true, ease: 'inOutSine' } as const;
-    if (beat) {
-      // Lub-dub, then rest: about 50 beats a minute. The ping ring (if any) leaves on the first beat.
-      const period = 1250;
-      animate('[data-orb-beat]', {
-        scale: [
-          { to: 1.075, duration: 140, ease: 'outQuad' },
-          { to: 0.985, duration: 130, ease: 'inOutQuad' },
-          { to: 1.045, duration: 130, ease: 'outQuad' },
-          { to: 1, duration: 340, ease: 'inOutSine' },
-        ],
-        loop: true,
-        loopDelay: period - 740,
-      });
-      if (ping) animate('[data-orb-ping]', { scale: [1, 1.6], opacity: [0.45, 0], duration: period, loop: true, ease: 'outQuad' });
-    } else if (drift) {
-      // drift={false} keeps the ball fixed (inside a ring or a badge); its lights still turn.
-      animate('[data-orb-body]', { y: [amp * 0.4, -amp], duration: 1900 + phase * 600, delay: phase * 900, ...common });
-      animate('[data-orb-body]', { x: [-amp * 0.4, amp * 0.4], duration: 2800 + phase * 900, delay: phase * 1300, ...common });
-      animate('[data-orb-body]', { scale: [0.97, 1.04], duration: 2300, ...common });
-    }
-    animate('[data-orb-glow]', { rotate: 360, duration: 14000, loop: true, ease: 'linear' });
-    animate('[data-orb-shine]', { rotate: -360, duration: 9000, loop: true, ease: 'linear' });
-    if (ping && !beat) animate('[data-orb-ping]', { scale: [1, 1.75], opacity: [0.4, 0], duration: 2600, loop: true, ease: 'outQuad' });
-  }, [live, size, ping, drift, beat]);
 
   const ring = outline ? (
     <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-full" style={{ boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 22%, transparent)' }} />
@@ -116,31 +108,45 @@ export function BrandOrb({ size = 28, live = false, ping = false, drift = true, 
     );
   }
 
+  // drift={false} keeps the ball fixed (inside a ring or a badge); its lights still turn. A beat replaces the drift.
+  const drifting = drift && !beat;
+  const dy = 1900 + phase * 600;
+  const dx = 2800 + phase * 900;
+  const vars: OrbVars = {
+    inset: gap,
+    '--orb-dy': ms(dy),
+    '--orb-dy-delay': ms(-phase * dy),
+    '--orb-dx': ms(dx),
+    '--orb-dx-delay': ms(-phase * dx),
+    '--orb-db': '2300ms',
+  };
+
   return (
     <span ref={root} aria-hidden="true" className={`relative inline-block shrink-0 ${className}`} style={{ width: size, height: size }}>
-      {ping ? <span data-orb-ping className="absolute inset-0 rounded-full opacity-0" style={{ border: '1.5px solid var(--color-ink)' }} /> : null}
-      <span data-orb-beat className="absolute inset-0 block will-change-transform">
+      {ping ? <span className={`absolute inset-0 rounded-full opacity-0 ${beat ? 'orb-beat-ping' : 'orb-ping'}`} style={{ border: '1.5px solid var(--color-ink)', '--orb-ping': '2600ms' } as OrbVars} /> : null}
+      <span className={`absolute inset-0 block ${beat ? 'orb-beat' : ''}`}>
         {ring}
-        <span data-orb-body className="absolute block overflow-hidden rounded-full will-change-transform" style={{ inset: gap }}>
-          <svg width={inner} height={inner} viewBox="0 0 100 100" className="block" aria-hidden="true">
-            <defs>
-              <BrandBase id={id} />
-            </defs>
-            <circle cx="50" cy="50" r="48" fill={`url(#bb${id})`} />
-          </svg>
-          <span data-orb-glow className="absolute inset-0 block">
+        <span className={`absolute block ${drifting ? 'orb-dy' : ''}`} style={vars}>
+          <span className={`absolute inset-0 block overflow-hidden rounded-full ${drifting ? 'orb-dx' : ''}`}>
             <svg width={inner} height={inner} viewBox="0 0 100 100" className="block" aria-hidden="true">
               <defs>
-                <BrandBase id={`${id}g`} />
+                <BrandBase id={id} />
               </defs>
-              {glowCircles(`${id}g`)}
+              <circle cx="50" cy="50" r="48" fill={`url(#bb${id})`} />
             </svg>
+            <span className="orb-spin absolute inset-0 block" style={{ '--orb-spin': '14000ms' } as OrbVars}>
+              <svg width={inner} height={inner} viewBox="0 0 100 100" className="block" aria-hidden="true">
+                <defs>
+                  <BrandBase id={`${id}g`} />
+                </defs>
+                {glowCircles(`${id}g`)}
+              </svg>
+            </span>
+            <span
+              className="orb-spin-rev absolute inset-0 rounded-full"
+              style={{ '--orb-spin': '9000ms', background: 'radial-gradient(circle at 33% 27%, rgba(255,255,255,0.75) 0%, rgba(255,255,255,0.15) 12%, rgba(255,255,255,0) 26%)' } as OrbVars}
+            />
           </span>
-          <span
-            data-orb-shine
-            className="absolute inset-0 rounded-full"
-            style={{ background: 'radial-gradient(circle at 33% 27%, rgba(255,255,255,0.75) 0%, rgba(255,255,255,0.15) 12%, rgba(255,255,255,0) 26%)' }}
-          />
         </span>
       </span>
     </span>
@@ -180,38 +186,41 @@ function OrbSvg({ model, size, className, shine = true }: { model: OrbModel; siz
 function LiveOrb({ model, size, className = '', state, ping }: { model: OrbModel; size: number; className?: string; state: VendorState; ping: boolean }) {
   const { base } = colors(model);
   const phase = usePhase();
-  const down = state === 'down';
-
-  const root = useAnime<HTMLSpanElement>(() => {
-    if (down) return; // a down provider sits still
-    const rate = state === 'slow' ? 0.4 : 1;
-    const amp = Math.max(1.5, size * 0.09);
-    const common = { loop: true, alternate: true, ease: 'inOutSine', playbackRate: rate } as const;
-    // Two drifts with unrelated periods trace a wandering path that never visibly repeats.
-    animate('[data-orb-body]', { y: [amp * 0.4, -amp], duration: 1700 + phase * 600, delay: phase * 900, ...common });
-    animate('[data-orb-body]', { x: [-amp * 0.45, amp * 0.45], duration: 2600 + phase * 900, delay: phase * 1300, ...common });
-    animate('[data-orb-body]', { scale: [0.97, 1.04], duration: 2200 + phase * 400, ...common });
-    // The highlight orbits the sphere, so it reads as a turning ball rather than a flat disc.
-    animate('[data-orb-shine]', { rotate: 360, duration: 7000 + phase * 3000, loop: true, ease: 'linear', playbackRate: rate });
-    if (ping) {
-      animate('[data-orb-ping]', { scale: [1, 1.75], opacity: [0.45, 0], duration: 2400, delay: phase * 1200, loop: true, ease: 'outQuad', playbackRate: rate });
-    }
-  }, [state, size, ping]);
+  const root = useOffscreenPause<HTMLSpanElement>();
+  const down = state === 'down'; // a down provider sits still
+  // A slow provider moves at 0.4× speed: every period is 2.5× longer.
+  const k = state === 'slow' ? 2.5 : 1;
+  // Two drifts with unrelated periods trace a wandering path that never visibly repeats.
+  const dy = (1700 + phase * 600) * k;
+  const dx = (2600 + phase * 900) * k;
+  const db = (2200 + phase * 400) * k;
+  const vars: OrbVars = {
+    '--orb-dy': ms(dy),
+    '--orb-dy-delay': ms(-phase * dy),
+    '--orb-dx': ms(dx),
+    '--orb-dx-delay': ms(-phase * dx),
+    '--orb-db': ms(db),
+  };
 
   return (
     <span
       ref={root}
       aria-hidden="true"
-      className={`relative inline-block shrink-0 transition-[opacity,filter] duration-300 ${down ? 'opacity-50 grayscale' : ''} ${className}`}
+      // Only the opacity fades; the greyscale switches at once (CSS filters are never animated here).
+      className={`relative inline-block shrink-0 transition-opacity duration-300 ${down ? 'opacity-50 grayscale' : ''} ${className}`}
       style={{ width: size, height: size }}>
-      {ping && !down ? <span data-orb-ping className="absolute inset-0 rounded-full opacity-0" style={{ border: `1.5px solid ${base}` }} /> : null}
-      <span data-orb-body className="absolute inset-0 block overflow-hidden rounded-full will-change-transform">
-        <OrbSvg model={model} size={size} shine={false} className="block" />
-        <span
-          data-orb-shine
-          className="absolute inset-0 rounded-full"
-          style={{ background: 'radial-gradient(circle at 32% 26%, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.35) 22%, rgba(255,255,255,0) 48%)' }}
-        />
+      {ping && !down ? (
+        <span className="orb-ping absolute inset-0 rounded-full opacity-0" style={{ border: `1.5px solid ${base}`, '--orb-ping': ms(2400 * k), '--orb-ping-delay': ms(-phase * 2400 * k) } as OrbVars} />
+      ) : null}
+      <span className={`absolute inset-0 block ${down ? '' : 'orb-dy'}`} style={vars}>
+        <span className={`absolute inset-0 block overflow-hidden rounded-full ${down ? '' : 'orb-dx'}`}>
+          <OrbSvg model={model} size={size} shine={false} className="block" />
+          {/* The highlight orbits the sphere, so it reads as a turning ball rather than a flat disc. */}
+          <span
+            className={`absolute inset-0 rounded-full ${down ? '' : 'orb-spin'}`}
+            style={{ '--orb-spin': ms((7000 + phase * 3000) * k), background: 'radial-gradient(circle at 32% 26%, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.35) 22%, rgba(255,255,255,0) 48%)' } as OrbVars}
+          />
+        </span>
       </span>
     </span>
   );

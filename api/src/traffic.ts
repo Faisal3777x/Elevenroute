@@ -60,7 +60,7 @@ export async function generateTraffic(ws: Workspace, count = 500): Promise<{ con
   let turns = 0;
   try {
     for (let i = 0; i < count; i++) {
-      const language = weighted<Language>([['en', 6], ['es', 4]]);
+      const language: Language = 'en';
       const useCase: UseCase = pick(USE_CASES);
       const customer = 'default';
       const entry = CONTENT[useCase].langs[language];

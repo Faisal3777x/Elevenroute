@@ -2,7 +2,8 @@
 // Import with `import type` only, so neither runtime ever loads this file.
 
 export type Vendor = 'openai' | 'google' | 'anthropic';
-export type Language = 'en' | 'es';
+/** English only. The language stays part of every request, policy and quality segment so more can be added later. */
+export type Language = 'en';
 export type UseCase = 'appointment' | 'refund' | 'order_status' | 'insurance' | 'complaint' | 'faq';
 export type TurnType = 'simple' | 'complex';
 export type VendorState = 'healthy' | 'down' | 'slow';
@@ -144,6 +145,9 @@ export interface ChatResponse {
   provider: Vendor | null;
   latency_ms: number;
   cost_usd: number;
+  /** Tokens billed for the turn (0 when no model answered). */
+  tokens_in: number;
+  tokens_out: number;
   route_reason: string;
   failover_used: boolean;
   turn_type: TurnType;
@@ -273,6 +277,95 @@ export interface AppConfig {
   keys: Record<Vendor, boolean>;
   /** Whether this user may switch to live mode (LIVE_MODE_EMAILS on the API). */
   liveAllowed?: boolean;
+}
+
+// ---- ElevenAgent: a stateful agent that sits above the router ----
+export type AgentScenarioId = 'refund' | 'insurance' | 'appointment';
+/** Business systems the agent reads and writes. In this build both connectors are simulated. */
+export type AgentSystem = 'salesforce' | 'sap';
+/** active: still working · done: goal met · declined: customer said no · handoff: passed to a person. */
+export type AgentStatus = 'active' | 'done' | 'declined' | 'handoff';
+
+/** One thing the agent must know before it can act. */
+export interface AgentSlot {
+  id: string;
+  label: string;
+  value: string | null;
+  /** Turn in which the customer supplied it. */
+  turn: number | null;
+}
+
+export interface AgentToolInfo {
+  id: string;
+  system: AgentSystem;
+  operation: string;
+  /** Writes change a record, so they wait for the customer's confirmation. */
+  write: boolean;
+  /** Slots that must be filled first. */
+  needs: string[];
+}
+
+export interface AgentToolCall extends AgentToolInfo {
+  turn: number;
+  result: Record<string, string>;
+}
+
+export interface AgentScenario {
+  id: AgentScenarioId;
+  useCase: UseCase;
+  title: string;
+  goal: string;
+  slots: { id: string; label: string }[];
+  tools: AgentToolInfo[];
+  /** Customer lines that walk the conversation to its goal, per language. */
+  script: Record<Language, string[]>;
+  /** The slot each script line supplies, in the same order. */
+  scriptFills: string[];
+}
+
+/** Conversation state held by the agent, not by any model. */
+export interface AgentSession {
+  id: string;
+  scenario: AgentScenarioId;
+  language: Language;
+  customerId: string;
+  status: AgentStatus;
+  turns: number;
+  /** Slot the agent is waiting for; null once the conversation is closed. */
+  awaiting: string | null;
+  slots: AgentSlot[];
+  calls: AgentToolCall[];
+  /** Model that answered each turn, in order (null: no model answered). */
+  models: (string | null)[];
+  costUsd: number;
+  /** The same tokens priced on the customer's best allowed model for each turn (the one-model baseline). */
+  baselineUsd: number;
+  latencyMs: number;
+  /** Tokens of conversation so far; resent to the model as context on the next turn. */
+  transcriptTokens: number;
+}
+
+export interface AgentTurnRequest {
+  session_id: string;
+  scenario: AgentScenarioId;
+  language: Language;
+  customer_id: string;
+  message: string;
+}
+
+export interface AgentTurnResponse {
+  reply: string;
+  session: AgentSession;
+  /** Slot ids filled by this turn. */
+  filled: string[];
+  /** Tool calls made in this turn. */
+  calls: AgentToolCall[];
+  /** Context tokens (earlier turns plus state) sent with this turn. */
+  contextTokens: number;
+  /** What this turn's tokens would cost on the best allowed model; null when no model answered. */
+  baseline: { modelId: string; costUsd: number } | null;
+  /** The router's decision and result for this turn. */
+  route: ChatResponse;
 }
 
 /** GET /me: who is signed in and which workspace their data lives in. */

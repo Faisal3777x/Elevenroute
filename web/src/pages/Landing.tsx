@@ -1,49 +1,31 @@
 import { animate, createTimeline, stagger, svg, utils } from 'animejs';
-import {
-  ArrowRight, ArrowUpRight, Calculator, FlaskConical, Gauge, Globe2, Languages, LayoutDashboard, MessagesSquare, Pause, Play, ServerCrash, Server, ShieldCheck, SkipForward, SlidersHorizontal, Wallet, type LucideIcon,
-} from 'lucide-react';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ArrowRight, ArrowUpRight, Bot, MessagesSquare, Pause, Play, ServerCrash, SkipForward, Split, Wallet, type LucideIcon } from 'lucide-react';
+import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform } from 'motion/react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
-import type { AppConfig, ModelInfo, Overview, PreviewResponse, Savings, TestCase, TestRun } from '../../../shared/types';
+import type { AppConfig, ModelInfo, Overview, PreviewResponse, Savings, TestCase } from '../../../shared/types';
+import { AgentStage } from '../components/AgentStage';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 import { BrandOrb, Orb } from '../components/Orb';
+import { PromoSlot } from '../components/PromoSlot';
 import { TurnBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { useOnScreen } from '../lib/anime';
 import { useAuth } from '../lib/auth';
-import { count, LANGS, USE_CASES } from '../lib/format';
+import { count, USE_CASES } from '../lib/format';
+import { useIndicator } from '../lib/indicator';
 import { EASE } from '../lib/motion';
+import { PROMO } from '../lib/promo';
 import { sortModels, VENDOR_NAMES, VENDOR_ORDER, VENDOR_SHORT } from '../lib/theme';
 import { useApi } from '../lib/useApi';
+
+// The landing page is the hook: one idea, a live demo, three reasons, proof, one next step. Detail lives in the
+// dashboard pages it links to (how a turn is routed: Routing rules; how the agent works: ElevenAgent).
 
 /** One message every STEP_MS: it travels into the router, then out to the model the router picked. */
 const STEP_MS = 3800;
 const HUB = 112;
-
-const PAGES: { to: string; title: string; body: string; icon: LucideIcon }[] = [
-  { to: '/overview', title: 'Overview', body: 'Spend, savings against each customer’s best allowed model, and traffic by model.', icon: LayoutDashboard },
-  { to: '/playground', title: 'Playground', body: 'Send a message and watch every routing step, failover included.', icon: MessagesSquare },
-  { to: '/rules', title: 'Routing rules', body: 'Edit the classifier, quality floors, the strategy and your customer policy.', icon: SlidersHorizontal },
-  { to: '/providers', title: 'Providers', body: 'Models, prices and health per vendor, with outage switches for testing.', icon: Server },
-  { to: '/tests', title: 'Test results', body: 'Scores per language and turn type from the shared test conversations.', icon: FlaskConical },
-  { to: '/whatif', title: 'What-if', body: 'Re-price logged traffic under another choice before you change a rule.', icon: Calculator },
-];
-
-const STEPS = [
-  { title: 'Read the turn', body: 'Weighted rules you can edit score each message. A score of 2 or more counts as complex.' },
-  { title: 'Pick the model', body: 'Simple turns go to the cheapest model that clears your quality floor; complex turns to the strongest. Policy and language filter first.' },
-  { title: 'Fail over', body: 'An error, an open breaker or a slow answer moves the turn to the next model, preferring another vendor.' },
-  { title: 'Keep it honest', body: 'The same test conversations run against every model. Models that fall below the floor drop out on their own.' },
-];
-
-const CONTROLS: { title: string; body: string; icon: LucideIcon }[] = [
-  { title: 'Quality floors', body: 'Set the minimum test score a model needs before it may answer simple turns, globally or per language.', icon: Gauge },
-  { title: 'Customer policy', body: 'Choose which vendors and data regions are allowed, so data only goes where your contracts say it can.', icon: ShieldCheck },
-  { title: 'Language preferences', body: 'Give each language its own floor and the vendor order to break ties.', icon: Languages },
-  { title: 'Your own rules', body: 'Decide what “complex” means: words, phrases and weights are yours to edit, with a live preview.', icon: SlidersHorizontal },
-];
 
 /** Static film grain (SVG turbulence), tiled. */
 const GRAIN = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
@@ -66,116 +48,94 @@ function useScale(): number {
 /** Blended price per 1k tokens, the same weighting the router uses (about 3 input tokens per output token). */
 const blended = (m: ModelInfo) => (3 * m.costIn + m.costOut) / 4;
 
+/** Where the footer leads: the dashboard pages a visitor is most likely to want next. */
+const FOOTER_LINKS = [
+  { to: '/overview', label: 'Overview' },
+  { to: '/agent', label: 'ElevenAgent' },
+  { to: '/playground', label: 'Playground' },
+  { to: '/rules', label: 'Routing rules' },
+  { to: '/tests', label: 'Test results' },
+];
+
 export default function Landing() {
   const { enabled, session } = useAuth();
   // With sign-in on, the API needs a session; the landing page then shows without live data.
   const canFetch = !enabled || Boolean(session);
   const config = useApi<AppConfig>(canFetch ? '/config' : null);
 
-  // Black theme for this page only: the page behind it (overscroll, body) goes black while it is open.
-  useEffect(() => {
-    document.title = 'ElevenRoute · The right AI model for every customer message';
-    document.documentElement.classList.add('landing-dark');
-    return () => document.documentElement.classList.remove('landing-dark');
+  // Arriving from a scrolled dashboard page, start at the top (unless the link points at a section of this page).
+  useLayoutEffect(() => {
+    if (!window.location.hash) window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
 
-  const openAccess = !enabled && config.data?.liveAllowed === false;
+  // Black theme for this page only: the page behind it (overscroll, body) goes black while it is open.
+  useEffect(() => {
+    document.title = 'ElevenRoute · Smart where it matters. Cheap where it doesn’t.';
+    document.documentElement.classList.add('landing-dark');
+    // Black status bar while the black page is open (index.html already sets both when the site opens here).
+    const theme = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    theme?.setAttribute('content', '#09090a');
+    return () => {
+      document.documentElement.classList.remove('landing-dark');
+      theme?.setAttribute('content', '#fdfcfc'); // the dashboard's canvas colour
+    };
+  }, []);
+
   const k = useScale();
 
   return (
     <div className="theme-dark relative min-h-dvh overflow-x-clip">
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[60] opacity-[0.045] mix-blend-soft-light" style={{ backgroundImage: GRAIN, backgroundSize: '220px 220px' }} />
+      {/* Film grain: a plain low-opacity layer. No blend mode, which would make the browser re-blend the whole screen
+          on every frame of every animation underneath it. */}
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[60] opacity-[0.03]" style={{ backgroundImage: GRAIN, backgroundSize: '220px 220px' }} />
       <TopBar />
 
       <main id="main">
         <Hero />
-        <Problem canFetch={canFetch} />
 
-        <section id="live" aria-label="Live routing" className="mx-auto mt-28 max-w-[77.5rem] scroll-mt-20 px-4 sm:px-8 lg:mt-36">
-          <Reveal as="div">
-            <SectionTitle eyebrow="The fix">ElevenRoute sits between your assistant and the models, and decides every turn.</SectionTitle>
-            <motion.p variants={item} className="mt-4 max-w-[62ch] text-[1rem] leading-relaxed text-pretty text-ink-2">
-              Below, the real router behind this page is reading sample customer messages, checking them against policy and quality floors, and choosing a model for each. These are dry runs: decisions only, no model is called.
-            </motion.p>
+        {/* The ad slot exists only once an ad is configured in lib/promo.ts. */}
+        {PROMO ? (
+          <Reveal id="film" className="mx-auto mt-16 max-w-[77.5rem] px-4 sm:px-8 lg:mt-20">
+            {/* Never taller than the screen: on a short screen the frame narrows so the whole ad is in view at once. */}
+            <div className="mx-auto w-full max-w-[calc((100svh-9rem)*16/9)]">
+              <PromoSlot promo={PROMO} />
+            </div>
           </Reveal>
-          <div className="mt-10">
-            <Stage canFetch={canFetch} demo={config.data?.mode !== 'live'} />
-          </div>
-        </section>
+        ) : null}
 
-        <Reveal id="how" className="mx-auto mt-28 max-w-[77.5rem] px-4 sm:px-8 lg:mt-36">
-          <SectionTitle eyebrow="How a turn is routed">Four decisions, made before any model is called.</SectionTitle>
-          <ol className="mt-12 grid gap-x-10 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
-            {STEPS.map((s, i) => (
-              <motion.li key={s.title} variants={item} className="border-t border-ink/15 pt-5">
-                <span className="font-mono text-[0.75rem] tracking-[0.08em] text-ink-3">{String(i + 1).padStart(2, '0')}</span>
-                <h3 className="mt-3 text-[1.1875rem] font-medium tracking-[-0.01em] text-ink">{s.title}</h3>
-                <p className="mt-2 text-[0.9375rem] leading-relaxed text-pretty text-ink-2">{s.body}</p>
-              </motion.li>
-            ))}
-          </ol>
-        </Reveal>
-
+        <Live canFetch={canFetch} sample={config.data?.mode !== 'live'} k={k} />
+        <Why canFetch={canFetch} />
         <Proof canFetch={canFetch} />
 
-        <Reveal id="control" className="mx-auto mt-28 max-w-[77.5rem] px-4 sm:px-8 lg:mt-36">
-          <SectionTitle eyebrow="You stay in control">Cheaper where it’s safe. Never below the bar you set.</SectionTitle>
-          <ul className="mt-12 grid gap-x-10 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
-            {CONTROLS.map((c) => (
-              <motion.li key={c.title} variants={item}>
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-ink/[0.06] text-ink ring-1 ring-ink/10">
-                  <c.icon size="1.125rem" aria-hidden="true" />
-                </span>
-                <h3 className="mt-4 text-[1.0625rem] font-medium text-ink">{c.title}</h3>
-                <p className="mt-1.5 text-[0.9063rem] leading-relaxed text-pretty text-ink-2">{c.body}</p>
-              </motion.li>
-            ))}
-          </ul>
-        </Reveal>
-
-        <Reveal id="inside" className="mx-auto mt-28 max-w-[77.5rem] px-4 sm:px-8 lg:mt-36">
-          <SectionTitle eyebrow="Inside the dashboard">Everything the router does, in the open.</SectionTitle>
-          <ul className="mt-10 grid border-t border-line md:grid-cols-2 md:gap-x-12">
-            {PAGES.map((p) => (
-              <motion.li key={p.to} variants={item} className="border-b border-line">
-                <Link to={p.to} className="group flex items-center gap-4 rounded-2xl py-5 transition-colors hover:bg-card/70 sm:px-3">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-card text-ink transition-colors group-hover:bg-ink group-hover:text-canvas">
-                    <p.icon size="1.125rem" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[1rem] font-medium text-ink">{p.title}</span>
-                    <span className="mt-0.5 block text-[0.875rem] leading-snug text-ink-2">{p.body}</span>
-                  </span>
-                  <ArrowUpRight size="1.125rem" aria-hidden="true" className="shrink-0 text-ink-3 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-ink" />
-                </Link>
-              </motion.li>
-            ))}
-          </ul>
-        </Reveal>
-
+        {/* The closing ask repeats the hero's first action: play a call. */}
         <Reveal className="mx-auto mt-28 max-w-[77.5rem] px-4 pb-10 sm:px-8 lg:mt-36">
-          <motion.div variants={item} className="relative overflow-hidden rounded-[1.75rem] border border-line px-6 py-14 sm:px-12 lg:py-20">
-            <Glow className="-top-40 -right-24 h-[28.75rem] w-[28.75rem]" />
+          <div className="relative overflow-hidden rounded-[1.75rem] border border-line px-6 py-14 sm:px-12 lg:py-20">
+            <Glow className="-top-40 -right-24 h-[28.75rem] w-[28.75rem]" period={26} delay={9} />
             <div className="relative flex flex-col items-start gap-8 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h2 className="h-display max-w-[16ch] text-[clamp(2.25rem,5vw,4rem)] leading-[1.02] text-balance">Send a message. Watch where it goes.</h2>
-                <p className="mt-4 max-w-[48ch] text-[1rem] leading-relaxed text-ink-2">Type anything a customer might write in the Playground and see the decision, the model, the cost and every step behind it.</p>
+              <div className="min-w-0">
+                <h2 className="h-display max-w-[18ch] text-[clamp(2.25rem,5vw,4rem)] leading-[1.02] tracking-[-0.032em] text-balance">See a whole call, start to finish.</h2>
+                <p className="mt-4 max-w-[46ch] text-[1rem] leading-relaxed text-ink-2">Play a refund, a renewal or a booking with ElevenAgent, or type your own message in the Playground and see the model, the cost and every step behind the answer.</p>
               </div>
-              <div className="flex flex-wrap gap-3">
-                <CtaLink to="/playground">Open the Playground</CtaLink>
-                <CtaLink to="/overview" variant="secondary">See the Overview</CtaLink>
+              {/* The text gives way, not the buttons: they stay side by side on one row. */}
+              <div className="flex flex-wrap gap-3 lg:shrink-0 lg:flex-nowrap">
+                <CtaLink to="/agent">Play a live call</CtaLink>
+                <CtaLink to="/playground" variant="secondary">Open the Playground</CtaLink>
               </div>
             </div>
-          </motion.div>
+          </div>
         </Reveal>
       </main>
 
-      <footer className="mx-auto flex max-w-[77.5rem] flex-col gap-3 px-4 pt-6 pb-12 text-[0.8125rem] text-ink-3 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-        <span className="flex items-center gap-2">
+      <footer className="mx-auto flex max-w-[77.5rem] flex-col gap-5 px-4 pt-8 pb-12 text-[0.8125rem] text-ink-3 sm:px-8 md:flex-row md:items-center md:justify-between">
+        <Link to="/" className="flex w-fit items-center gap-2 rounded-xl text-ink-2" aria-label="ElevenRoute home">
           <BrandOrb size={Math.round(20 * k)} outline />
           ElevenRoute
-        </span>
-        {openAccess ? <span>Open access: everyone with this link shares one demo workspace, so live mode is locked and nothing here calls a paid model.</span> : null}
+        </Link>
+        <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
+          {FOOTER_LINKS.map((l) => (
+            <Link key={l.to} to={l.to} className="rounded transition-[color,opacity] hover:text-ink active:opacity-60">{l.label}</Link>
+          ))}
+        </nav>
       </footer>
     </div>
   );
@@ -191,17 +151,19 @@ function TopBar() {
     window.addEventListener('scroll', on, { passive: true });
     return () => window.removeEventListener('scroll', on);
   }, []);
+  const anchor = 'hidden rounded-full px-3 py-2 text-[0.875rem] text-ink-2 transition-[color,opacity] hover:text-ink active:opacity-60 md:inline-block';
   return (
-    <header className={`sticky top-0 z-40 border-b backdrop-blur transition-colors duration-300 ${scrolled ? 'border-line bg-canvas/80' : 'border-transparent bg-canvas/0'}`}>
+    // The blur only exists once there is something under the bar to blur (backdrop filters cost a repaint per frame).
+    <header className={`landing-bar sticky top-0 z-40 border-b transition-colors duration-300 ${scrolled ? 'border-line bg-canvas/80 backdrop-blur' : 'border-transparent bg-canvas/0'}`}>
       <div className="mx-auto flex h-16 max-w-[77.5rem] items-center justify-between gap-4 px-4 sm:px-8">
         <Link to="/" className="flex items-center gap-2.5 rounded-xl" aria-label="ElevenRoute home">
           <BrandOrb size={Math.round(30 * k)} live beat outline />
           <span className="h-display text-[1.375rem]">ElevenRoute</span>
         </Link>
         <nav aria-label="Landing" className="flex items-center gap-1 sm:gap-2">
-          <a href="#problem" className="hidden rounded-full px-3 py-2 text-[0.875rem] text-ink-2 hover:text-ink md:inline-block">Why</a>
-          <a href="#live" className="hidden rounded-full px-3 py-2 text-[0.875rem] text-ink-2 hover:text-ink md:inline-block">See it live</a>
-          <a href="#how" className="hidden rounded-full px-3 py-2 text-[0.875rem] text-ink-2 hover:text-ink sm:inline-block">How it works</a>
+          {PROMO ? <a href="#film" className={anchor}>Watch</a> : null}
+          <a href="#live" className={anchor}>See it live</a>
+          <a href="#why" className={anchor}>Why it pays</a>
           <CtaLink to="/overview" size="sm">Open dashboard</CtaLink>
         </nav>
       </div>
@@ -209,176 +171,274 @@ function TopBar() {
   );
 }
 
-/** Soft, static brand-coloured light (decorative; never animated, so it costs nothing to render). */
-function Glow({ className = '' }: { className?: string }) {
+/**
+ * Soft brand-coloured light that drifts and breathes very slowly (`.glow-drift`: a CSS loop on the compositor, so
+ * it costs no script; stopped under reduced motion). `period` and `delay` keep two glows from moving in step.
+ */
+function Glow({ className = '', period = 22, delay = 0 }: { className?: string; period?: number; delay?: number }) {
   return (
     <div
       aria-hidden="true"
-      className={`pointer-events-none absolute rounded-full ${className}`}
-      style={{ background: 'radial-gradient(closest-side, rgb(122 92 255 / 0.22), rgb(63 193 180 / 0.10) 55%, transparent)' }}
+      className={`glow-drift pointer-events-none absolute rounded-full ${className}`}
+      style={{ background: 'radial-gradient(closest-side, rgb(122 92 255 / 0.22), rgb(63 193 180 / 0.10) 55%, transparent)', '--glow-period': `${period}s`, '--glow-delay': `${-delay}s` } as CSSProperties}
     />
   );
 }
 
-const HEADLINE = 'Use the big model only when the message needs it.';
+/** The line to remember, one sentence per line. */
+const HEADLINE = ['Smart where it matters.', 'Cheap where it doesn’t.'];
 
-function Hero() {
-  const k = useScale();
-  const words = HEADLINE.split(' ');
+/**
+ * The brand mark, large and alive: its three provider lights circle the black sphere. It leans a little towards the
+ * pointer (a soft spring, mouse only) and drifts up and dims as the page scrolls past it, so the hero has depth.
+ * Transforms and opacity only; with reduced motion it simply sits still.
+ */
+function HeroOrb({ k }: { k: number }) {
+  const reduce = useReducedMotion() ?? false;
+  const px = useMotionValue(0);
+  const py = useMotionValue(0);
+  const sx = useSpring(px, { stiffness: 50, damping: 16, mass: 0.8 });
+  const sy = useSpring(py, { stiffness: 50, damping: 16, mass: 0.8 });
+  const x = useTransform(sx, (v) => v * 22);
+  const y = useTransform(sy, (v) => v * 16);
+  const glowX = useTransform(sx, (v) => v * -14);
+  const glowY = useTransform(sy, (v) => v * -10);
+
+  useEffect(() => {
+    if (reduce) return;
+    const on = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      px.set(e.clientX / window.innerWidth - 0.5);
+      py.set(e.clientY / window.innerHeight - 0.5);
+    };
+    window.addEventListener('pointermove', on, { passive: true });
+    return () => window.removeEventListener('pointermove', on);
+  }, [reduce, px, py]);
+
   return (
-    <section className="relative mx-auto max-w-[77.5rem] px-4 pt-12 pb-10 sm:px-8 lg:pt-20">
-      <Glow className="-top-32 right-[-7.5rem] h-[38.75rem] w-[38.75rem]" />
-      {/* The brand mark, large and alive: its three provider lights circle the black sphere. */}
+    <div aria-hidden="true" className="hero-orb-scroll pointer-events-none absolute top-24 right-10 hidden xl:block">
+      {/* The halo moves against the orb, which reads as depth. */}
+      <motion.div className="absolute -inset-16 rounded-full" style={{ ...(reduce ? {} : { x: glowX, y: glowY }), background: 'radial-gradient(closest-side, rgb(122 92 255 / 0.26), rgb(63 193 180 / 0.08) 60%, transparent)' }} />
+      {/* Decoration in the hero's entrance: it fades in with the headline and doesn't move on its way in. */}
       <motion.div
-        aria-hidden="true"
-        initial={{ opacity: 0, scale: 0.86 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 1.1, delay: 0.2, ease: EASE }}
-        className="pointer-events-none absolute top-24 right-10 hidden rounded-full shadow-[0_40px_120px_-20px_rgb(122_92_255/0.35)] xl:block">
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.9, ease: EASE }}
+        style={reduce ? undefined : { x, y }}
+        className="relative rounded-full">
         <BrandOrb size={Math.round(320 * k)} live beat outline ping />
       </motion.div>
+    </div>
+  );
+}
+
+/**
+ * The hero's entrance, as one wave: the headline is the lead (two lines rising out of their masks, 110 ms apart), the
+ * sentence and buttons follow as support, and the pill, the provider row and the orb only fade. The gaps shrink
+ * (0 → 110 → 200 → 270 ms) and everything has landed by about 0.8 s. With reduced motion there are no delays.
+ */
+function Hero() {
+  const k = useScale();
+  const reduce = useReducedMotion() ?? false;
+  const at = (s: number) => (reduce ? 0 : s);
+  return (
+    <section className="relative mx-auto max-w-[77.5rem] px-4 pt-[clamp(2rem,6svh,5rem)] pb-6 sm:px-8">
+      <Glow className="-top-32 right-[-7.5rem] h-[38.75rem] w-[38.75rem]" />
+      <HeroOrb k={k} />
       <motion.p
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: EASE }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4, ease: EASE }}
         className="relative inline-flex items-center gap-2 rounded-full border border-line bg-card/60 px-3 py-1.5 text-[0.8125rem] text-ink-2">
         <span className="relative flex h-2 w-2" aria-hidden="true">
           <span className="absolute inset-0 animate-ping rounded-full bg-ok/50" />
           <span className="relative h-2 w-2 rounded-full bg-ok" />
         </span>
-        LLM routing for customer service
+        <span>
+          <span className="hidden sm:inline">AI customer service · </span>ElevenAgent + ElevenRoute
+        </span>
       </motion.p>
 
-      <h1 className="h-display relative mt-7 max-w-[14ch] text-[clamp(2.625rem,6.8vw,6rem)] leading-[0.98] text-balance">
-        {words.map((w, i) => (
-          <span key={i} className="-mb-[0.1em] inline-block overflow-hidden pb-[0.18em] align-bottom">
-            <motion.span className="-mb-[0.1em] inline-block pb-[0.1em] bg-gradient-to-b from-[#ffffff] via-[#f4f1ed] to-[#a9a29b] bg-clip-text text-transparent" initial={{ y: '105%' }} animate={{ y: 0 }} transition={{ duration: 0.8, delay: 0.08 + i * 0.055, ease: EASE }}>
-              {w}
-              {i < words.length - 1 ? ' ' : ''}
+      {/* Two lines on laptops and desktops: the size follows the width beside the orb (the longest line is about
+          10.6 em wide, so width / 11.2 always fits) and the screen height, so on a short screen the headline, the
+          sentence and the buttons all fit in the first view. Phones wrap to four lines at the 2.5rem minimum. */}
+      <h1 className="h-display relative mt-7 tracking-[-0.035em] text-[clamp(2.5rem,min(10svh,calc((min(100vw,77.5rem)-4rem)/11.2)),5.5rem)] leading-[0.98] xl:max-w-[calc(100%-23rem)] xl:text-[clamp(2.5rem,min(10svh,calc((min(100vw,77.5rem)-27rem)/11.2)),5.5rem)]">
+        {HEADLINE.map((line, i) => (
+          // Each line rises out of its own mask (the padding keeps descenders inside it); the second follows the first.
+          <span key={line} className="-mb-[0.1em] block overflow-hidden pb-[0.18em]">
+            <motion.span
+              className="-mb-[0.1em] block pb-[0.1em] text-balance bg-gradient-to-b from-[#ffffff] via-[#f4f1ed] to-[#a9a29b] bg-clip-text text-transparent"
+              initial={{ y: '105%' }}
+              animate={{ y: 0 }}
+              transition={{ duration: 0.65, delay: at(i * 0.11), ease: EASE }}>
+              {line}
             </motion.span>
           </span>
         ))}
       </h1>
 
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.55, ease: EASE }}
-        className="relative mt-9 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-[54ch]">
-          <p className="text-[1.0625rem] leading-relaxed text-pretty text-ink-2 sm:text-[1.125rem]">
-            ElevenRoute sits between your customer-service assistant and the AI providers. It reads every message, sends the simple ones to a fast, low-cost model and the hard ones to a strong one, and moves to another provider the moment one fails.
-          </p>
-          <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3 text-[0.875rem] text-ink-2">
-            <span className="text-ink-3">Routes across</span>
-            {VENDOR_ORDER.map((v) => (
-              <span key={v} className="inline-flex items-center gap-2">
-                <Orb model={{ vendor: v, tier: 'flagship' }} size={Math.round(20 * k)} live />
-                {VENDOR_NAMES[v]}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <CtaLink to="/overview">Open the dashboard</CtaLink>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: at(0.2), ease: EASE }} className="relative mt-8 max-w-[52ch]">
+        <p className="text-[1.0625rem] leading-relaxed text-pretty text-ink-2 sm:text-[1.1875rem]">
+          ElevenAgent runs the whole customer call and remembers every detail. ElevenRoute picks the AI model for each turn, and switches provider the moment one fails.
+        </p>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <CtaLink to="/agent">Play a live call</CtaLink>
           <CtaLink href="#live" variant="secondary">Watch it route</CtaLink>
         </div>
+      </motion.div>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, delay: at(0.27), ease: EASE }} className="relative mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 text-[0.875rem] text-ink-2">
+        <span className="text-ink-3">Every turn, across</span>
+        {VENDOR_ORDER.map((v) => (
+          <span key={v} className="inline-flex items-center gap-2">
+            <Orb model={{ vendor: v, tier: 'flagship' }} size={Math.round(20 * k)} live />
+            {VENDOR_NAMES[v]}
+          </span>
+        ))}
       </motion.div>
     </section>
   );
 }
 
-// ---------- the pitch: problem and proof ----------
-function Problem({ canFetch }: { canFetch: boolean }) {
+// ---------- the live demo: one stage at a time ----------
+type Tab = 'route' | 'call';
+const TABS: { id: Tab; label: string; icon: LucideIcon; caption: string }[] = [
+  { id: 'route', label: 'Route a message', icon: Split, caption: 'Sample customer messages go through the real router. Simple ones go to a fast model, hard ones to a strong one.' },
+  { id: 'call', label: 'Handle a whole call', icon: MessagesSquare, caption: 'ElevenAgent works through a real call: it remembers, acts, and lets the router pick the model for every turn.' },
+];
+
+function Live({ canFetch, sample, k }: { canFetch: boolean; sample: boolean; k: number }) {
+  const [tab, setTab] = useState<Tab>('route');
+  const current = TABS.find((t) => t.id === tab)!;
+  // The active tab's pill slides on the compositor (useIndicator).
+  const [tabList, tabPill] = useIndicator<HTMLDivElement>('[aria-selected="true"]', [tab]);
+  return (
+    <section id="live" aria-label="See it live" className="mx-auto mt-24 max-w-[77.5rem] scroll-mt-20 px-4 sm:px-8 lg:mt-32">
+      <Reveal as="div" className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <SectionTitle eyebrow="Live on this page">Watch it decide, turn by turn.</SectionTitle>
+        <div ref={tabList} role="tablist" aria-label="What to watch" className="relative inline-flex w-fit gap-1 rounded-full bg-card p-1 ring-1 ring-line">
+          <span aria-hidden="true" className="pointer-events-none absolute top-0 left-0 rounded-full bg-ink" style={tabPill} />
+          {TABS.map((t) => {
+            const on = t.id === tab;
+            return (
+              <button key={t.id} type="button" role="tab" aria-selected={on} aria-controls="live-panel" onClick={() => setTab(t.id)} className="press relative inline-flex h-10 items-center gap-2 rounded-full px-4 text-[0.875rem] font-medium">
+                <span className={`relative z-[1] inline-flex items-center gap-2 transition-colors duration-200 ${on ? 'text-canvas' : 'text-ink-2 hover:text-ink'}`}>
+                  <t.icon size="1rem" aria-hidden="true" />
+                  {t.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Reveal>
+      {/* Two dense stages of different heights would fight if they crossfaded, so the old one leaves first; its exit
+          is a quick fade (150 ms), and the caption swaps in step with it. */}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.p key={`c-${tab}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} transition={{ duration: 0.2, ease: EASE }} className="mt-5 max-w-[62ch] text-[0.9375rem] leading-relaxed text-ink-2">
+          {current.caption}
+        </motion.p>
+      </AnimatePresence>
+      {/* Only the visible stage runs, so the page never animates or fetches for a demo nobody is looking at. */}
+      <div id="live-panel" role="tabpanel" className="mt-6">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.15 } }} transition={{ duration: 0.3, ease: EASE }}>
+            {tab === 'route' ? <Stage canFetch={canFetch} sample={sample} /> : <AgentStage canFetch={canFetch} k={k} />}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </section>
+  );
+}
+
+// ---------- why it pays: three reasons, each leading to the page with the detail ----------
+function Why({ canFetch }: { canFetch: boolean }) {
   const providers = useApi<ModelInfo[]>(canFetch ? '/providers' : null);
   // Price gap from the live catalogue, never a made-up figure.
   const ratio = useMemo(() => {
     const prices = (providers.data ?? []).filter((m) => m.enabled).map(blended).filter((p) => p > 0);
     return prices.length > 1 ? Math.max(...prices) / Math.min(...prices) : null;
   }, [providers.data]);
-  const points: { icon: LucideIcon; title: string; body: ReactNode }[] = [
+  const reasons: { icon: LucideIcon; title: string; body: ReactNode; to: string; cta: string }[] = [
     {
       icon: Wallet,
-      title: 'Paying flagship prices for “thanks”',
+      title: '“Thanks” doesn’t need a flagship model.',
       body: (
         <>
-          “Yes, that works.” “Where’s order 48213?” Many support turns are this simple, yet a one-model setup sends every one of them to the same model.
-          {ratio ? <> In this demo’s price list the priciest model costs <strong className="font-medium text-ink">{Math.round(ratio)}×</strong> the cheapest per token.</> : null}
+          Simple turns go to a fast, low-cost model that clears your quality bar. Hard ones get the strongest.
+          {ratio ? <> In our sample price list the priciest model costs <strong className="font-medium text-ink">{Math.round(ratio)}×</strong> the cheapest.</> : null}
         </>
       ),
+      to: '/overview',
+      cta: 'See the savings',
     },
     {
       icon: ServerCrash,
-      title: 'One provider, one outage from silence',
-      body: 'When your only provider errors or slows down, every customer in the queue waits with it.',
+      title: 'An outage becomes a non-event.',
+      body: 'When a provider errors or slows down, the same turn is answered by another vendor, and the conversation carries on.',
+      to: '/playground',
+      cta: 'Try an outage',
     },
     {
-      icon: Globe2,
-      title: 'Switching models is a blind bet',
-      body: 'Without the same tests on every model, nobody can say where quality drops, so teams never dare to move off the expensive one.',
+      icon: Bot,
+      title: 'Nothing is asked twice.',
+      body: 'ElevenAgent keeps the state of the call, so the model can change between turns and the customer never repeats themselves.',
+      to: '/agent',
+      cta: 'Play a call',
     },
   ];
   return (
-    <Reveal id="problem" className="mx-auto mt-24 max-w-[77.5rem] px-4 sm:px-8 lg:mt-32">
-      <SectionTitle eyebrow="The problem">Most support messages don’t need your most expensive model.</SectionTitle>
-      <ul className="mt-12 grid gap-10 md:grid-cols-3">
-        {points.map((p) => (
-          <motion.li key={p.title} variants={item} className="border-t border-ink/15 pt-6">
-            <p.icon size="1.25rem" className="text-ember" aria-hidden="true" />
-            <h3 className="mt-4 text-[1.1875rem] font-medium tracking-[-0.01em] text-ink">{p.title}</h3>
-            <p className="mt-2 text-[0.9375rem] leading-relaxed text-pretty text-ink-2">{p.body}</p>
-          </motion.li>
+    <Reveal id="why" className="mx-auto mt-28 max-w-[77.5rem] px-4 sm:px-8 lg:mt-36">
+      <SectionTitle eyebrow="Why it pays">Most customer messages don’t need your most expensive model.</SectionTitle>
+      <ul className="reveal-cascade mt-12 grid gap-10 md:grid-cols-3">
+        {reasons.map((r, i) => (
+          <li key={r.title} className="flex flex-col border-t border-ink/15 pt-6">
+            <r.icon size="1.25rem" className="icon-pop text-ember" style={{ animationDelay: `${280 + i * 100}ms` }} aria-hidden="true" />
+            <h3 className="mt-4 text-[1.1875rem] font-medium tracking-[-0.01em] text-balance text-ink">{r.title}</h3>
+            <p className="mt-2 text-[0.9375rem] leading-relaxed text-pretty text-ink-2">{r.body}</p>
+            <Link to={r.to} className="group mt-4 inline-flex w-fit items-center gap-1.5 rounded-full text-[0.875rem] font-medium text-ink transition-opacity active:opacity-60">
+              {r.cta}
+              <ArrowUpRight size="1rem" aria-hidden="true" className="text-ink-3 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-ink" />
+            </Link>
+          </li>
         ))}
       </ul>
     </Reveal>
   );
 }
 
-/** Real numbers from this demo's logged (simulated) traffic and test runs, labelled as such. */
+/** Real numbers from this demo's logged (simulated) traffic, labelled as such. Hidden until there is traffic. */
 function Proof({ canFetch }: { canFetch: boolean }) {
   const savings = useApi<Savings>(canFetch ? '/stats/savings?days=14' : null);
   const overview = useApi<Overview>(canFetch ? '/stats/overview?days=14' : null);
-  const runs = useApi<TestRun[]>(canFetch ? '/tests/runs' : null);
-  const providers = useApi<ModelInfo[]>(canFetch ? '/providers' : null);
-  const cases = useApi<TestCase[]>(canFetch ? '/tests/cases' : null);
   const s = savings.data;
   const o = overview.data;
-  if (!s || !o) return null;
+  if (!s || !o || s.turns === 0) return null;
 
-  const tested = (providers.data ?? []).filter((m) => m.testScore !== null).length;
   const rescued = Math.max(0, o.failovers - (s.unansweredTurns ?? 0));
   const cheaper = s.savings >= 0;
 
   return (
     <Reveal id="proof" className="mx-auto mt-28 max-w-[77.5rem] px-4 sm:px-8 lg:mt-36">
-      <SectionTitle eyebrow="In this demo">What routing changed on the demo’s traffic.</SectionTitle>
-      {s.turns === 0 ? (
-        <motion.p variants={item} className="mt-8 max-w-[60ch] text-[1rem] leading-relaxed text-ink-2">
-          No traffic has been logged yet. Generate some on the <Link to="/overview" className="font-medium text-ink underline underline-offset-4">Overview</Link> and this section fills in with real numbers from it.
-        </motion.p>
-      ) : (
-        <>
-          <div className="mt-12 grid gap-px overflow-hidden rounded-[1.5rem] border border-line bg-line sm:grid-cols-2 lg:grid-cols-4">
-            <Figure value={Math.abs(s.savingsPct)} format={(n) => `${n.toFixed(1)}%`} label={cheaper ? 'lower model spend than sending every turn to the best allowed model' : 'higher spend than the best-model baseline'} tone={cheaper ? 'ok' : 'warn'} />
-            <Figure value={s.turns} format={count} label="turns routed in the last 14 days" />
-            <Figure value={rescued} format={count} label={rescued === 1 ? 'turn answered by another provider after a failure' : 'turns answered by another provider after a failure'} />
-            <Figure value={tested} format={count} label={tested ? `models scored on the same ${cases.data?.length ?? 24} test conversations${runs.data?.length ? ` (${runs.data.length} ${runs.data.length === 1 ? 'run' : 'runs'})` : ''}` : 'models tested so far: run the tests to score them'} />
-          </div>
-          <motion.p variants={item} className="mt-4 text-[0.7813rem] leading-relaxed text-ink-3">
-            Measured on this demo’s logged traffic, which comes from simulated providers at illustrative prices. Your own traffic and prices give your own numbers.
-          </motion.p>
-        </>
-      )}
+      <SectionTitle eyebrow="Sample results">What routing changed on sample traffic.</SectionTitle>
+      <div className="reveal-cascade mt-12 grid gap-px overflow-hidden rounded-[1.5rem] border border-line bg-line sm:grid-cols-3">
+        <Figure value={Math.abs(s.savingsPct)} format={pct1} label={cheaper ? 'lower model spend than sending every turn to the best allowed model' : 'extra cost against the best-model baseline'} tone={cheaper ? 'ok' : 'warn'} />
+        <Figure value={s.turns} format={count} label={s.turns === 1 ? 'turn routed in the last 14 days' : 'turns routed in the last 14 days'} />
+        <Figure value={rescued} format={count} label={rescued === 1 ? 'turn answered by another provider after a failure' : 'turns answered by another provider after a failure'} />
+      </div>
+      <p className="fine mt-4 text-[0.7813rem] leading-relaxed text-ink-3">
+        Sample data: logged traffic from simulated providers at illustrative prices. Your own traffic and prices give your own numbers.
+      </p>
     </Reveal>
   );
 }
 
+const pct1 = (n: number) => `${n.toFixed(1)}%`;
+
 function Figure({ value, format, label, tone }: { value: number; format: (n: number) => string; label: string; tone?: 'ok' | 'warn' }) {
   return (
-    <motion.div variants={item} className="bg-canvas p-6 sm:p-8">
-      <AnimatedNumber value={value} format={format} className={`h-display block text-[2.75rem] leading-none sm:text-[3.25rem] ${tone === 'ok' ? 'text-ok' : tone === 'warn' ? 'text-ember' : ''}`} />
+    <div className="bg-canvas p-6 sm:p-8">
+      <AnimatedNumber startOnView value={value} format={format} className={`h-display block text-[2.75rem] leading-none sm:text-[3.25rem] ${tone === 'ok' ? 'text-ok' : tone === 'warn' ? 'text-ember' : ''}`} />
       <p className="mt-3 text-[0.875rem] leading-snug text-ink-2">{label}</p>
-    </motion.div>
+    </div>
   );
 }
 
@@ -391,7 +451,7 @@ const curve = (a: Pt, b: Pt) => {
   return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
 };
 
-/** Alternate simple and complex turns (and languages) so the loop shows both routes. */
+/** Alternate simple and complex turns so the loop shows both routes. */
 function interleave(cases: TestCase[]): TestCase[] {
   const simple = cases.filter((c) => c.turnType === 'simple');
   const complex = cases.filter((c) => c.turnType === 'complex');
@@ -415,7 +475,7 @@ function useWide() {
   return wide;
 }
 
-function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
+function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
   const reduce = useReducedMotion() ?? false;
   const wide = useWide();
   const k = useScale();
@@ -570,14 +630,14 @@ function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
             {playing && !reduce ? <span className="absolute inset-0 animate-ping rounded-full bg-ember/60" /> : null}
             <span className="relative h-2 w-2 rounded-full bg-ember" />
           </span>
-          <span><strong className="font-medium text-ink">Real router decisions</strong> · dry runs, no model is called</span>
+          <span><strong className="font-medium text-ink">Real router decisions</strong> · sample messages</span>
         </div>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => setPlaying((p) => !p)}
             aria-pressed={!playing}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-canvas px-3.5 text-[0.8125rem] font-medium text-ink hover:border-ink/20">
+            className="press inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-canvas px-3.5 text-[0.8125rem] font-medium text-ink transition-colors hover:border-ink/20">
             {playing ? <Pause size="0.875rem" aria-hidden="true" /> : <Play size="0.875rem" aria-hidden="true" />}
             {playing ? 'Pause' : 'Play'}
           </button>
@@ -585,7 +645,7 @@ function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
             type="button"
             onClick={() => setStep((s) => s + 1)}
             disabled={!ready}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-canvas px-3.5 text-[0.8125rem] font-medium text-ink hover:border-ink/20 disabled:opacity-50">
+            className="press inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-canvas px-3.5 text-[0.8125rem] font-medium text-ink transition-colors hover:border-ink/20 disabled:opacity-50">
             <SkipForward size="0.875rem" aria-hidden="true" />
             Next
           </button>
@@ -624,11 +684,9 @@ function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
                   transition={{ duration: 0.5, ease: EASE }}
                   className={`mb-3 rounded-2xl bg-canvas px-4 py-3 ring-1 ring-line ${i > 0 ? 'hidden lg:block' : ''}`}>
                   <div className="mb-1 flex items-center gap-2 text-[0.7188rem] font-medium tracking-[0.04em] text-ink-3 uppercase">
-                    <span>{LANGS.find((l) => l.value === tc.language)?.label ?? tc.language}</span>
-                    <span aria-hidden="true">·</span>
                     <span>{USE_CASES.find((u) => u.value === tc.useCase)?.label ?? tc.useCase}</span>
                   </div>
-                  <p className="line-clamp-2 text-[0.875rem] leading-snug text-ink">{tc.message}</p>
+                  <p className="line-clamp-2 text-[0.875rem] leading-snug text-ink [overflow-wrap:anywhere]">{tc.message}</p>
                 </motion.div>
               ))}
             </AnimatePresence>
@@ -648,7 +706,7 @@ function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
             <AnimatePresence mode="wait" initial={false}>
               {decision ? (
                 <motion.div key={shown} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.3, ease: EASE }} className="mt-2">
-                  <TurnBadge turnType={decision.turn_type} score={decision.trace.classification.score} />
+                  <TurnBadge turnType={decision.turn_type} />
                   <p className="mt-2 line-clamp-2 text-[0.7813rem] leading-snug text-ink-2">{decision.route_reason}</p>
                 </motion.div>
               ) : (
@@ -668,7 +726,8 @@ function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
                 <li
                   key={m.id}
                   data-anchor-model={m.id}
-                  className={`flex items-center gap-3 rounded-2xl px-3 py-2.5 transition-[background-color,box-shadow] duration-300 ${on ? 'bg-canvas shadow-[var(--shadow-card)] ring-1 ring-ink/10' : 'ring-1 ring-transparent'}`}>
+                  // Only the background fades; the shadow and ring (box-shadows) switch at once.
+                  className={`flex items-center gap-3 rounded-2xl px-3 py-2.5 transition-[background-color] duration-300 ${on ? 'bg-canvas shadow-[var(--shadow-card)] ring-1 ring-ink/10' : 'ring-1 ring-transparent'}`}>
                   <Orb model={m} size={Math.round(24 * k)} live />
                   <span className="min-w-0 flex-1">
                     <span className={`block truncate text-[0.875rem] font-medium transition-colors ${on ? 'text-ink' : 'text-ink-2'}`}>{m.name}</span>
@@ -676,7 +735,7 @@ function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
                   </span>
                   <AnimatePresence>
                     {on ? (
-                      <motion.span initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85 }} transition={{ duration: 0.25, ease: EASE }} className="inline-flex items-center gap-1 rounded-full bg-ink px-2.5 py-1 text-[0.7188rem] font-medium text-canvas">
+                      <motion.span initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15, ease: EASE } }} transition={{ duration: 0.25, ease: EASE }} className="inline-flex items-center gap-1 rounded-full bg-ink px-2.5 py-1 text-[0.7188rem] font-medium text-canvas">
                         Chosen
                       </motion.span>
                     ) : null}
@@ -689,26 +748,43 @@ function Stage({ canFetch, demo }: { canFetch: boolean; demo: boolean }) {
         </div>
       </div>
 
-      {demo ? <p className="mt-6 text-[0.75rem] text-ink-3">Demo mode: model quality scores, latencies and errors are simulated settings, not live measurements.</p> : null}
+      {sample ? <p className="mt-6 text-[0.75rem] text-ink-3">Sample data: quality scores, prices and latencies are illustrative settings, not live measurements.</p> : null}
     </div>
   );
 }
 
 // ---------- small pieces ----------
-const item = { hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } } };
-const revealVariants = { hidden: {}, show: { transition: { staggerChildren: 0.07 } } };
-
+/**
+ * A landing section that rises in once, as it scrolls into view. It only flags itself (`data-in`); the entrance is
+ * CSS (`.reveal` in index.css, compositor-only): the first child leads and travels furthest, the rest follow with
+ * shrinking gaps, `.fine` print only fades, and a `.reveal-cascade` inside flows in item by item.
+ */
 function Reveal({ children, className = '', id, as = 'section' }: { children: ReactNode; className?: string; id?: string; as?: 'section' | 'div' }) {
-  const props = { id, className: `scroll-mt-20 ${className}`, initial: 'hidden', whileInView: 'show', viewport: { once: true, margin: '0px 0px -12% 0px' }, variants: revealVariants } as const;
-  return as === 'div' ? <motion.div {...props}>{children}</motion.div> : <motion.section {...props}>{children}</motion.section>;
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    if (!el || inView) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setInView(true);
+        io.disconnect();
+      },
+      { rootMargin: '0px 0px -12% 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [el, inView]);
+  const props = { ref: setEl, id, 'data-in': inView ? '' : undefined, className: `reveal scroll-mt-20 ${className}` };
+  return as === 'div' ? <div {...props}>{children}</div> : <section {...props}>{children}</section>;
 }
 
 function SectionTitle({ eyebrow, children }: { eyebrow: string; children: ReactNode }) {
   return (
-    <motion.div variants={item}>
+    <div>
       <p className="text-[0.8125rem] font-medium tracking-[0.06em] text-ink-3 uppercase">{eyebrow}</p>
-      <h2 className="h-display mt-3 max-w-[24ch] text-[clamp(1.875rem,3.6vw,2.875rem)] leading-[1.05] text-balance">{children}</h2>
-    </motion.div>
+      <h2 className="h-display mt-3 max-w-[24ch] text-[clamp(1.875rem,3.6vw,2.875rem)] leading-[1.05] tracking-[-0.028em] text-balance">{children}</h2>
+    </div>
   );
 }
 
@@ -716,7 +792,7 @@ function SectionTitle({ eyebrow, children }: { eyebrow: string; children: ReactN
 function CtaLink({ to, href, children, variant = 'primary', size = 'md' }: { to?: string; href?: string; children: ReactNode; variant?: 'primary' | 'secondary'; size?: 'sm' | 'md' }) {
   const look = variant === 'primary' ? 'bg-ink text-canvas hover:bg-ink/90' : 'border border-line bg-canvas text-ink hover:border-ink/30 hover:bg-card';
   const sizing = size === 'sm' ? 'h-9 px-4 text-[0.8125rem] gap-1.5' : 'h-12 px-6 text-[0.9375rem] gap-2';
-  const cls = `group inline-flex items-center rounded-full font-medium transition-colors active:scale-[0.98] ${look} ${sizing}`;
+  const cls = `group inline-flex items-center rounded-full font-medium transition-[color,background-color,border-color,scale] duration-[160ms] active:scale-[0.97] ${look} ${sizing}`;
   const inner = (
     <>
       {children}

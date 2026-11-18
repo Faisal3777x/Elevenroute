@@ -14,7 +14,7 @@ const { openWorkspace, workspaceIdFor } = await import('../src/store.ts');
 // Each test gets a fresh workspace (seeded demo setup) in the in-memory database.
 let ws: Awaited<ReturnType<typeof openWorkspace>>;
 
-type Lang = 'en' | 'es';
+type Lang = 'en';
 const base = (message: string, language: Lang = 'en', customerId = 'default') => ({
   message, language, useCase: 'faq' as const, customerId, requireKeys: false, breaker: new Breaker(() => ws.strategy),
 });
@@ -35,17 +35,12 @@ test('confirmations are simple, disputes are complex', () => {
   const th = ws.strategy.complexThreshold;
   assert.equal(classify('Yes, that works', 'faq', ws.rules, th).turnType, 'simple');
   assert.equal(classify('I want a refund', 'refund', ws.rules, th).turnType, 'complex');
-  assert.equal(classify('sí, gracias', 'faq', ws.rules, th).turnType, 'simple');
 });
 
-test('Spanish dispute keywords are detected', () => {
-  const r = classify('Quiero un reembolso', 'faq', ws.rules, ws.strategy.complexThreshold);
-  assert.ok(r.hits.some((h) => h.id === 'dispute'));
-});
-
-test('only English and Spanish are supported', () => {
-  assert.deepEqual(ws.languages.map((l) => l.language), ['en', 'es']);
-  assert.equal(TEST_CASES.length, 24);
+test('only English is supported', () => {
+  assert.deepEqual(ws.languages.map((l) => l.language), ['en']);
+  assert.ok(ws.models.every((m) => m.languages.join() === 'en'));
+  assert.equal(TEST_CASES.length, 12);
 });
 
 test('disabled rules do not fire', () => {
@@ -65,12 +60,6 @@ test('simple turns go to the cheapest model above the floor', () => {
 test('complex turns go to the highest-quality model', () => {
   const d = decide(ws, base(TEST_CASES.find((c) => c.id === 'refund-en-complex')!.message));
   assert.equal(d.ranked[0].id, 'claude-sonnet-5-5');
-});
-
-test('Spanish simple turns use the global floor and the cheapest model', () => {
-  const d = decide(ws, base('Sí, gracias', 'es'));
-  assert.equal(d.floor, 0.78);
-  assert.equal(d.ranked[0].id, 'gemini-2.5-flash');
 });
 
 test('customer policy filters vendors and regions', () => {

@@ -64,7 +64,7 @@ function useSaver<T>(path: string, wrap: (v: T) => unknown) {
 
 function Preview({ policies }: { policies: CustomerPolicy[] }) {
   const [message, setMessage] = useState('I was charged twice and I want a refund for the duplicate payment today. Who approves this?');
-  const [language, setLanguage] = useState<Language>('en');
+  const language: Language = 'en';
   const [useCase, setUseCase] = useState<UseCase>('refund');
   const [customer, setCustomer] = useState('default');
   const [result, setResult] = useState<PreviewResponse | null>(null);
@@ -88,7 +88,6 @@ function Preview({ policies }: { policies: CustomerPolicy[] }) {
       <View style={{ gap: S.md }}>
         <Field value={message} onChangeText={setMessage} multiline style={{ minHeight: 70, textAlignVertical: 'top' }} accessibilityLabel="Message to classify" />
         <Row wrap gap={S.md}>
-          <Segmented small value={language} onChange={setLanguage} options={LANGS} />
           <Segmented small value={customer} onChange={setCustomer} options={policies.map((p) => ({ value: p.id, label: p.name }))} />
         </Row>
         <Row wrap gap={6}>

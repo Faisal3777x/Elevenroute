@@ -13,7 +13,7 @@ export function ChartTooltip({ active, payload, label, format, labelFormat, tota
   const rows = payload.filter((p) => Number(p.value) > 0);
   const sum = rows.reduce((s, p) => s + Number(p.value), 0);
   return (
-    <div className="min-w-[180px] rounded-2xl border border-line bg-canvas/95 px-3.5 py-3 text-[12.5px] shadow-[var(--shadow-float)] backdrop-blur">
+    <div className="min-w-[180px] rounded-2xl border border-line bg-canvas/[0.97] px-3.5 py-3 text-[12.5px] shadow-[var(--shadow-float)]">
       {label !== undefined ? <div className="mb-1.5 font-medium text-ink">{labelFormat ? labelFormat(String(label)) : label}</div> : null}
       <div className="flex flex-col gap-1">
         {rows.map((p) => (

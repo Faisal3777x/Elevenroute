@@ -3,8 +3,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
 import type {
-  ChatRequest, ClassifierRule, CustomerPolicy, Language, LanguagePref, ModelInfo, PreviewResponse, Strategy, UseCase, Vendor, VendorState, WhatIfRequest,
+  AgentTurnRequest, ChatRequest, ClassifierRule, CustomerPolicy, Language, LanguagePref, ModelInfo, PreviewResponse, Strategy, UseCase, Vendor, VendorState, WhatIfRequest,
 } from '../../shared/types.ts';
+import { AGENT_SCENARIO_IDS, agentScenarios, agentTurn } from './agent.ts';
 import { AuthError, authEnabled, canUseLiveMode, demoOnly, userFromRequest } from './auth.ts';
 import { runTurn } from './chat.ts';
 import { LANGUAGES, TEST_CASES, USE_CASES } from './content.ts';
@@ -118,6 +119,25 @@ route('POST', '/mode', async ({ body, ws, user }) => {
 });
 
 route('POST', '/chat', ({ body, ws }) => runTurn(ws, chatRequest(body)));
+
+// ElevenAgent: a stateful conversation on top of the router. Simulated providers and connectors only.
+route('GET', '/agent/scenarios', () => agentScenarios());
+function agentRequest(ws: Workspace, body: Body): AgentTurnRequest {
+  const req: AgentTurnRequest = {
+    session_id: str(body.session_id, 'session_id', 100),
+    scenario: oneOf(body.scenario, AGENT_SCENARIO_IDS, 'scenario'),
+    language: oneOf<Language>(body.language ?? 'en', LANGUAGES, 'language'),
+    customer_id: typeof body.customer_id === 'string' ? body.customer_id : 'default',
+    message: str(body.message, 'message'),
+  };
+  const session = ws.agentSessions.get(req.session_id);
+  if (session && session.scenario !== req.scenario) throw new HttpError(400, 'This conversation belongs to another scenario. Start a new one.');
+  if (session && session.status !== 'active') throw new HttpError(409, 'This conversation is finished. Start a new one.');
+  return req;
+}
+route('POST', '/agent/turn', ({ body, ws }) => agentTurn(ws, agentRequest(ws, body)));
+// The same turn as a dry run (the landing page's live stage): nothing is logged and nothing waits.
+route('POST', '/agent/preview', ({ body, ws }) => agentTurn(ws, agentRequest(ws, body), { dry: true }));
 
 route('POST', '/route/preview', ({ body, ws }): PreviewResponse => {
   const req = chatRequest(body);

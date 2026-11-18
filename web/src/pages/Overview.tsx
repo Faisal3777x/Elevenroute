@@ -14,31 +14,28 @@ import { RouterConstellation } from '../components/Flow';
 import { Orb } from '../components/Orb';
 import { RoutingVisualiser, type RouteRun } from '../components/RoutingVisualiser';
 import { InfoTip } from '../components/Tooltip';
-import { Button, Card, Chip, Empty, ErrorNote, Page, PageHeader, Segmented, SimulatedTag, Skeleton, Status } from '../components/ui';
+import { Button, Card, Chip, Empty, ErrorNote, Page, PageHeader, Segmented, Skeleton, Status } from '../components/ui';
 import { VendorControls } from '../components/VendorControls';
 import { api } from '../lib/api';
-import { count, modelName, money, ms, pct, shortDate, timeAgo, weekTrend } from '../lib/format';
-import { useMode } from '../lib/mode';
-import { base, fadeUp } from '../lib/motion';
+import { count, modelName, money, ms, pct, plural, shortDate, timeAgo, weekTrend } from '../lib/format';
+import { base, EASE } from '../lib/motion';
 import { runFromChat, runFromPreview } from '../lib/runs';
 import { INK3, LINE, modelColor } from '../lib/theme';
 import { useApi } from '../lib/useApi';
 
 const SAMPLES = [
-  { id: 'order_status-en-simple', label: 'Simple · English' },
-  { id: 'refund-en-complex', label: 'Complex · English' },
-  { id: 'appointment-es-simple', label: 'Simple · Spanish' },
-  { id: 'complaint-es-complex', label: 'Complex · Spanish' },
+  { id: 'order_status-en-simple', label: 'Simple · Order status' },
+  { id: 'refund-en-complex', label: 'Complex · Refund' },
+  { id: 'appointment-en-simple', label: 'Simple · Appointment' },
+  { id: 'complaint-en-complex', label: 'Complex · Complaint' },
 ];
 
 export default function Overview() {
   const stats = useApi<OverviewData>('/stats/overview');
   const savings = useApi<Savings>('/stats/savings');
   const models = useApi<ModelInfo[]>('/providers');
-  const { config } = useMode();
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const demo = config?.mode !== 'live';
 
   const { reload: reloadStats } = stats;
   const { reload: reloadSavings } = savings;
@@ -70,7 +67,7 @@ export default function Overview() {
         setNotice(`Cleared ${count(r.deletedTurns)} logged turns. Settings and test results are unchanged.`);
       } else {
         await api.post('/reset');
-        setNotice('Demo reset: traffic, test results and all edits were cleared and the seed data restored.');
+        setNotice('Reset complete: traffic, test results and all edits were cleared and the starting data restored.');
         await models.reload();
       }
       setConfirmReset(false);
@@ -89,7 +86,6 @@ export default function Overview() {
   return (
     <Page>
       <PageHeader
-        eyebrow={demo ? <SimulatedTag>Demo data · simulated providers</SimulatedTag> : <SimulatedTag>Live data</SimulatedTag>}
         title="Overview"
         subtitle="Where every conversation turn went, what it cost, and how much routing saves compared with always using the best model."
         actions={
@@ -117,7 +113,7 @@ export default function Overview() {
         title="Reset traffic?"
         footer={
           <>
-            <Button variant="ghost" className="mr-auto" onClick={() => reset('all')} loading={resetting === 'all'} disabled={!!resetting}>Reset whole demo</Button>
+            <Button variant="ghost" className="mr-auto" onClick={() => reset('all')} loading={resetting === 'all'} disabled={!!resetting}>Reset everything</Button>
             <Button variant="secondary" onClick={() => setConfirmReset(false)} disabled={!!resetting}>Cancel</Button>
             <Button icon={RotateCcw} onClick={() => reset('traffic')} loading={resetting === 'traffic'} disabled={!!resetting}>Clear traffic</Button>
           </>
@@ -126,7 +122,7 @@ export default function Overview() {
           <strong className="font-medium text-ink">Clear traffic</strong> deletes all {s ? count(s.requests) : ''} logged turns: generated traffic and Playground conversations. The Overview, savings and What-if numbers go back to empty. Models, routing rules, policies and test results are kept.
         </p>
         <p className="mt-3 text-[13.5px] leading-relaxed text-ink-3">
-          <strong className="font-medium text-ink-2">Reset whole demo</strong> also deletes test results and undoes every edit to models, rules and policies. This can’t be undone.
+          <strong className="font-medium text-ink-2">Reset everything</strong> also deletes test results and undoes every edit to models, rules and policies. This can’t be undone.
         </p>
       </Modal>
 
@@ -136,22 +132,22 @@ export default function Overview() {
         <Empty
           visual={<RouterConstellation />}
           title="No traffic yet"
-          body="Generate 500 synthetic conversations across every call type, language and customer, including two replayed provider incidents. Synthetic traffic always uses simulated providers, so it never spends API credit."
+          body="Generate 500 sample conversations across every call type and customer, including two replayed provider incidents. Sample traffic always uses simulated providers, so it never spends API credit."
           action={<Button icon={Zap} onClick={generate} loading={generating}>Generate traffic</Button>}
         />
       ) : null}
 
       {s && s.requests > 0 ? (
         <>
-          {savings.data && savings.data.turns > 0 ? <SavingsHero data={savings.data} models={ms_} demo={demo} /> : null}
+          {savings.data && savings.data.turns > 0 ? <SavingsHero data={savings.data} models={ms_} /> : null}
           {!savings.data ? <Skeleton className="h-[497px] rounded-[var(--radius-card)] sm:h-[457px] lg:h-[361px] xl:h-[300px]" /> : null}
 
-          <motion.div variants={fadeUp} className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-            <Kpi label="Total requests" value={s.requests} format={count} trend={weekTrend(s.requestsDaily)} goodWhen="neutral" hint={`${count(s.conversations)} conversations · 14 days`} info="Conversation turns routed in the last 14 days. Each customer message is one request." />
+          <div className="cascade grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+            <Kpi label="Total requests" value={s.requests} format={count} trend={weekTrend(s.requestsDaily)} goodWhen="neutral" hint={`${plural(s.conversations, 'conversation')} · 14 days`} info="Conversation turns routed in the last 14 days. Each customer message is one request." />
             <Kpi label="Total model cost" value={s.totalCost} format={money} trend={weekTrend(costDaily)} goodWhen="neutral" hint="last 14 days" info="Sum of the cost of every turn: tokens × the serving model's price per 1k tokens." />
             <Kpi label="Avg cost per conversation" value={s.costPerConversation} format={money} info="Total model cost divided by the number of distinct conversations." />
             {savings.data && savings.data.turns > 0 ? (
-              <Kpi label="Estimated savings" value={savings.data.savingsPct} format={(n) => pct(n, 1)} hint={`${money(savings.data.savings)} vs best-model baseline`} tag={<SimulatedTag>Estimate</SimulatedTag>} info="Routed spend compared with the same logged tokens priced on the highest-quality model each customer may use. An estimate, not a measured saving." />
+              <Kpi label="Estimated savings" value={savings.data.savingsPct} format={(n) => pct(n, 1)} hint={`${money(savings.data.savings)} vs best-model baseline`} info="Routed spend compared with the same logged tokens priced on the highest-quality model each customer may use. An estimate, not a measured saving." />
             ) : (
               <Kpi label="Estimated savings" value={0} format={() => '—'} hint="Needs logged traffic" />
             )}
@@ -159,7 +155,7 @@ export default function Overview() {
             <Kpi label="P95 latency" value={s.p95LatencyMs} format={ms} info="The response time within which approximately 95% of measured requests are completed." />
             <Kpi label="Routing overhead (p95)" value={s.p95OverheadMs} format={ms} hint="budget 20 ms" info="Time ElevenRoute spends choosing a model, excluding the model call itself. 95% of decisions take this long or less." />
             <Kpi label="Failovers" value={s.failovers} format={count} trend={weekTrend(s.failoverDaily)} goodWhen="down" hint={`${((s.failovers / s.requests) * 100).toFixed(1)}% of turns`} info="Turns where the first model errored or exceeded the latency budget and another provider answered." />
-          </motion.div>
+          </div>
         </>
       ) : null}
 
@@ -188,29 +184,27 @@ function OverviewSkeleton() {
 }
 
 // ---------- savings hero ----------
-function SavingsHero({ data, models, demo }: { data: Savings; models: ModelInfo[]; demo: boolean }) {
+function SavingsHero({ data, models }: { data: Savings; models: ModelInfo[] }) {
   const max = Math.max(data.baselineCost, data.actualCost, 1e-9);
   const top = [...data.baselineModels].sort((a, b) => b.turns - a.turns)[0];
   return (
-    <motion.section variants={fadeUp} className="card relative overflow-hidden p-6 sm:p-8">
-      <div aria-hidden="true" className="pointer-events-none absolute -top-32 -right-24 h-96 w-96" style={{ background: 'radial-gradient(closest-side, rgb(4 71 255 / 0.08), transparent)' }} />
+    <section className="card relative overflow-hidden p-6 sm:p-8">
+      <div aria-hidden="true" className="glow-drift pointer-events-none absolute -top-32 -right-24 h-96 w-96" style={{ background: 'radial-gradient(closest-side, rgb(4 71 255 / 0.08), transparent)' }} />
       <div className="relative grid gap-8 lg:grid-cols-[1.1fr_1fr] lg:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="label">Estimated savings from routing · last {data.days} days</span>
-            <SimulatedTag>Estimate</SimulatedTag>
-            {demo ? <SimulatedTag>Simulated providers</SimulatedTag> : null}
-            <InfoTip content="We price the same logged tokens on the highest-quality model each customer's policy allows for that language and turn type, and compare with what routing actually spent. Both use current catalogue prices." />
+            <InfoTip content="We price the same logged tokens on the highest-quality model each customer's policy allows for that turn type, and compare with what routing actually spent. Both use current catalogue prices." />
           </div>
           <div className="mt-3 flex items-baseline gap-3">
             <AnimatedNumber value={Math.abs(data.savingsPct)} format={(n) => pct(n, 1)} className="h-display text-[64px] leading-none sm:text-[76px]" />
             <span className="text-[15px] text-ink-2">{data.savings >= 0 ? 'lower model spend' : 'higher spend than the baseline'}</span>
           </div>
           <p className="mt-3 max-w-lg text-[14.5px] leading-relaxed text-ink-2">
-            Routing cost <strong className="font-medium text-ink">{money(data.actualCost)}</strong> for {count(data.turns)} turns. Sending every turn to the best allowed model
+            Routing cost <strong className="font-medium text-ink">{money(data.actualCost)}</strong> for {plural(data.turns, 'turn')}. Sending every turn to the best allowed model
             {top ? <> (mostly {modelName(models, top.modelId)})</> : null} would have cost <strong className="font-medium text-ink">{money(data.baselineCost)}</strong>.
             {data.unansweredTurns > 0 ? <> {count(data.unansweredTurns)} more {data.unansweredTurns === 1 ? 'turn' : 'turns'} went to a person after every model failed, so {data.unansweredTurns === 1 ? 'it has' : 'they have'} no model cost.</> : null}
-            {data.uncoveredTurns > 0 ? <> {count(data.uncoveredTurns)} {data.uncoveredTurns === 1 ? 'turn is' : 'turns are'} left out because no model is allowed for {data.uncoveredTurns === 1 ? 'its' : 'their'} customer and language any more.</> : null}
+            {data.uncoveredTurns > 0 ? <> {count(data.uncoveredTurns)} {data.uncoveredTurns === 1 ? 'turn is' : 'turns are'} left out because no model is allowed for {data.uncoveredTurns === 1 ? 'its' : 'their'} customer any more.</> : null}
           </p>
           <Link to="/whatif" className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-medium text-ink hover:gap-2.5 transition-[gap]">
             Explore scenarios in What-if <ArrowRight size={15} aria-hidden="true" />
@@ -225,7 +219,7 @@ function SavingsHero({ data, models, demo }: { data: Savings; models: ModelInfo[
           </div>
         </div>
       </div>
-    </motion.section>
+    </section>
   );
 }
 
@@ -237,7 +231,7 @@ function CompareBar({ label, value, max, color }: { label: string; value: number
         <AnimatedNumber value={value} format={money} className="font-mono text-ink" />
       </div>
       <div className="h-3 overflow-hidden rounded-full bg-line/70">
-        <motion.div className="h-full rounded-full" style={{ background: color }} initial={{ width: 0 }} animate={{ width: `${(value / max) * 100}%` }} transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }} />
+        <motion.div className="h-full origin-left rounded-full" style={{ background: color }} initial={{ scaleX: 0 }} animate={{ scaleX: value / max }} transition={{ duration: 0.5, ease: EASE }} />
       </div>
     </div>
   );
@@ -256,7 +250,7 @@ function VisualiserCard({ models, onSent }: { models: ModelInfo[]; onSent: () =>
 
   const request = useMemo(() => (tc ? { message: tc.message, language: tc.language, use_case: tc.useCase, customer_id: customer } : null), [tc, customer]);
 
-  // Dry run whenever the sample or customer changes: shows the decision without calling a model.
+  // Preview whenever the sample or customer changes (a dry run): shows the decision without calling a model.
   useEffect(() => {
     if (!request) return;
     const c = new AbortController();
@@ -286,7 +280,7 @@ function VisualiserCard({ models, onSent }: { models: ModelInfo[]; onSent: () =>
   return (
     <Card
       title="How a request is routed"
-      subtitle="Every frame comes from the router's real decision and trace. The preview is a dry run; Send makes a real request that is logged like any other."
+      subtitle="Every frame replays the router's real decision. The preview only decides; Send also gets the reply and logs the turn like any other."
       right={<Button icon={Send} size="sm" onClick={send} loading={sending} disabled={!request}>Send through router</Button>}>
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Sample request">
@@ -345,9 +339,9 @@ function CostChart({ data, models }: { data: OverviewData; models: ModelInfo[] }
                   <CartesianGrid vertical={false} stroke={LINE} />
                   <XAxis dataKey="day" tickFormatter={shortDate} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} minTickGap={18} />
                   <YAxis tickFormatter={(v: number) => money(v)} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} width={58} />
-                  <Tooltip cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={money} total labelFormat={shortDate} />} />
+                  <Tooltip animationDuration={160} animationEasing="ease-out" cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={money} total labelFormat={shortDate} />} />
                   {series.filter((s) => !hidden.has(s.key)).map((s, i, arr) => (
-                    <Bar key={s.key} dataKey={s.key} name={s.label} stackId="cost" fill={s.color} radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0} isAnimationActive={!reduce} animationDuration={700} />
+                    <Bar key={s.key} dataKey={s.key} name={s.label} stackId="cost" fill={s.color} radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0} isAnimationActive={!reduce} animationDuration={750} animationEasing="ease-out" />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
@@ -395,11 +389,11 @@ function ShareChart({ data, models }: { data: OverviewData; models: ModelInfo[] 
             <CartesianGrid horizontal={false} stroke={LINE} />
             <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: INK3 }} />
             <YAxis type="category" dataKey="name" width={118} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#4a4541' }} />
-            <Tooltip cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={count} total />} />
-            <Bar dataKey="simple" name="Simple turns" stackId="t" isAnimationActive={!reduce} animationDuration={700}>
+            <Tooltip animationDuration={160} animationEasing="ease-out" cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={count} total />} />
+            <Bar dataKey="simple" name="Simple turns" stackId="t" isAnimationActive={!reduce} animationDuration={750} animationEasing="ease-out">
               {rows.map((r) => <Cell key={r.name} fill={r.color} />)}
             </Bar>
-            <Bar dataKey="complex" name="Complex turns" stackId="t" radius={[0, 4, 4, 0]} isAnimationActive={!reduce} animationDuration={700}>
+            <Bar dataKey="complex" name="Complex turns" stackId="t" radius={[0, 4, 4, 0]} isAnimationActive={!reduce} animationDuration={750} animationEasing="ease-out">
               {rows.map((r) => <Cell key={r.name} fill={r.color} fillOpacity={0.42} />)}
             </Bar>
           </BarChart>
@@ -419,23 +413,23 @@ function FailoverCard({ data, models }: { data: OverviewData; models: ModelInfo[
           <BarChart data={rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <XAxis dataKey="day" tickFormatter={shortDate} tickLine={false} axisLine={false} tick={{ fontSize: 10.5, fill: INK3 }} minTickGap={22} />
             <YAxis allowDecimals={false} tickCount={3} domain={[0, (max: number) => Math.max(2, max + (max % 2))]} tickLine={false} axisLine={false} tick={{ fontSize: 10.5, fill: INK3 }} width={28} />
-            <Tooltip cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={count} labelFormat={shortDate} />} />
-            <Bar dataKey="failovers" name="Failovers" fill="#4a4541" radius={[3, 3, 0, 0]} isAnimationActive={!reduce} />
+            <Tooltip animationDuration={160} animationEasing="ease-out" cursor={{ fill: 'rgb(0 0 0 / 0.03)' }} content={<ChartTooltip format={count} labelFormat={shortDate} />} />
+            <Bar dataKey="failovers" name="Failovers" fill="#4a4541" radius={[3, 3, 0, 0]} isAnimationActive={!reduce} animationDuration={750} animationEasing="ease-out" />
           </BarChart>
         </ResponsiveContainer>
       </div>
       <ul className="mt-4 flex flex-col gap-2.5">
         {data.recentFailovers.slice(0, 5).map((f, i) => (
-          <motion.li key={`${f.ts}-${i}`} variants={fadeUp} className="flex items-start gap-3">
+          <li key={`${f.ts}-${i}`} className="flex items-start gap-3">
             <Status kind={f.reason === 'timeout' ? 'slow' : 'down'} label={f.reason === 'timeout' ? 'Timeout' : 'Error'} />
             <div className="min-w-0 flex-1 text-[13.5px]">
               <div className="flex flex-wrap items-center gap-1.5">
                 <Orb model={models.find((m) => m.id === f.from)} size={14} />
                 {modelName(models, f.from)} <ArrowRight size={13} className="text-ink-3" aria-label="to" /> <Orb model={models.find((m) => m.id === f.to)} size={14} /> {modelName(models, f.to)}
               </div>
-              <div className="text-[12px] text-ink-3">{timeAgo(f.ts)} · {f.language.toUpperCase()}</div>
+              <div className="text-[12px] text-ink-3">{timeAgo(f.ts)}</div>
             </div>
-          </motion.li>
+          </li>
         ))}
         {data.recentFailovers.length === 0 ? <li className="text-[13px] text-ink-3">No failovers in this period.</li> : null}
       </ul>

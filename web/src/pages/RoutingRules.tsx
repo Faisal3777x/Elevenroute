@@ -6,15 +6,24 @@ import type {
   ClassifierRule, CustomerPolicy, Language, LanguagePref, ModelInfo, PreviewResponse, RoutingConfig, Strategy, UseCase, Vendor,
 } from '../../../shared/types';
 import { Collapse } from '../components/Collapse';
+import { HowItWorks } from '../components/HowItWorks';
 import { Orb } from '../components/Orb';
 import { RoutingVisualiser } from '../components/RoutingVisualiser';
 import { Button, Card, Chip, ErrorNote, Field, Page, PageHeader, Segmented, Skeleton, Status, TextArea, Toggle, TurnBadge } from '../components/ui';
 import { api } from '../lib/api';
-import { LANGS, money, USE_CASES } from '../lib/format';
+import { LANGS, money, signed, USE_CASES } from '../lib/format';
 import { base, spring } from '../lib/motion';
 import { runFromPreview } from '../lib/runs';
 import { modelColor, VENDOR_NAMES, VENDOR_ORDER } from '../lib/theme';
 import { useApi } from '../lib/useApi';
+
+/** How a turn is routed: four decisions, all made before any model is called. */
+const ROUTING_STEPS = [
+  { title: 'Read the turn', body: 'Weighted rules you can edit score each message. A score at or above the complex threshold counts as complex.' },
+  { title: 'Pick the model', body: 'Customer policy filters first. Simple turns go to the cheapest model that clears the quality floor; complex turns to the strongest.' },
+  { title: 'Fail over', body: 'An error, an open breaker or an answer slower than the latency budget moves the turn to the next model, preferring another vendor.' },
+  { title: 'Keep it honest', body: 'The same test conversations run against every model. Models that fall below the exclusion floor drop out on their own.' },
+];
 
 const NUM_FIELDS: { key: keyof Strategy; label: string; hint?: string }[] = [
   { key: 'simpleQualityFloor', label: 'Simple-turn quality floor', hint: 'Cheapest model at or above this wins' },
@@ -32,7 +41,8 @@ export default function RoutingRules() {
   const models = useApi<ModelInfo[]>('/providers');
   return (
     <Page>
-      <PageHeader title="Routing rules" subtitle="See exactly how a request is classified and ranked, then tune the thresholds, classifier, customer policies and language preferences." />
+      <PageHeader title="Routing rules" subtitle="See exactly how a request is classified and ranked, then tune the thresholds, the classifier, customer policies and vendor tie-breaks." />
+      <HowItWorks label="How a turn is routed" steps={ROUTING_STEPS} />
       {cfg.error && !cfg.data ? <ErrorNote error={cfg.error} onRetry={cfg.reload} /> : null}
       {!cfg.data ? <Skeleton className="h-[420px]" /> : null}
       {cfg.data ? (
@@ -89,7 +99,7 @@ function useSaver<T>(path: string, wrap: (v: T) => unknown, onSaved: () => void)
 // ---------- live preview ----------
 function Preview({ config, models }: { config: RoutingConfig; models: ModelInfo[] }) {
   const [message, setMessage] = useState('I was charged twice for the same order and I want a refund for the duplicate today. Who approves this?');
-  const [language, setLanguage] = useState<Language>('en');
+  const language: Language = 'en';
   const [useCase, setUseCase] = useState<UseCase>('refund');
   const [customer, setCustomer] = useState('default');
   const [result, setResult] = useState<PreviewResponse | null>(null);
@@ -121,12 +131,11 @@ function Preview({ config, models }: { config: RoutingConfig; models: ModelInfo[
   const ranked = [...(result?.trace.candidates ?? [])].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
 
   return (
-    <Card title="Live classifier preview" subtitle="A dry run: the router classifies and ranks, but no model is called and nothing is logged.">
+    <Card title="Live classifier preview" subtitle="The router classifies and ranks as you type. No model is called and nothing is logged.">
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
         <div className="flex flex-col gap-3">
           <TextArea label="Customer message" value={message} onChange={(e) => setMessage(e.target.value)} rows={3} />
           <div className="flex flex-wrap gap-3">
-            <Segmented size="sm" label="Language" value={language} onChange={setLanguage} options={LANGS} />
             {config.policies.length > 1 ? <Segmented size="sm" label="Customer" value={customer} onChange={setCustomer} options={config.policies.map((p) => ({ value: p.id, label: p.name }))} /> : null}
           </div>
           <div className="flex flex-wrap gap-1.5">{USE_CASES.map((u) => <Chip key={u.value} active={u.value === useCase} onClick={() => setUseCase(u.value)}>{u.label}</Chip>)}</div>
@@ -141,7 +150,13 @@ function Preview({ config, models }: { config: RoutingConfig; models: ModelInfo[
               </div>
               <div className="relative h-2.5 rounded-full" style={{ background: `linear-gradient(90deg, rgb(4 71 255 / 0.18) 0%, rgb(4 71 255 / 0.18) ${pos(threshold)}, rgb(255 71 4 / 0.2) ${pos(threshold)}, rgb(255 71 4 / 0.2) 100%)` }}>
                 <span className="absolute -top-1.5 h-5.5 w-0.5 rounded bg-ink/60" style={{ left: pos(threshold) }} aria-hidden="true" />
-                <motion.span className="absolute -top-[5px] h-5 w-5 -translate-x-1/2 rounded-full border-2 border-canvas bg-ink shadow" animate={{ left: pos(s) }} transition={spring} aria-hidden="true" />
+                {/* The knob rides a full-width layer that slides by transform (no layout animation of `left`). The clip,
+                    10 px wider than the track on each side (the knob's radius), stops that layer widening the page. */}
+                <span className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 overflow-x-clip" aria-hidden="true">
+                  <motion.span className="absolute inset-y-0 right-2.5 left-2.5" initial={false} animate={{ x: pos(s) }} transition={spring}>
+                    <span className="absolute top-[3px] left-0 h-5 w-5 -translate-x-1/2 rounded-full border-2 border-canvas bg-ink shadow" />
+                  </motion.span>
+                </span>
               </div>
               <div className="mt-2 flex justify-between text-[11px] text-ink-3"><span>← simpler</span><span>more complex →</span></div>
             </div>
@@ -152,20 +167,20 @@ function Preview({ config, models }: { config: RoutingConfig; models: ModelInfo[
             {config.rules.map((r) => {
               const h = hits.get(r.id);
               return (
-                <motion.div key={r.id} layout transition={spring} className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] transition-colors ${h ? 'bg-ink text-white' : 'bg-canvas text-ink-3 ring-1 ring-line'} ${!r.enabled ? 'opacity-50' : ''}`}>
+                <div key={r.id} className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] transition-colors ${h ? 'bg-ink text-white' : 'bg-canvas text-ink-3 ring-1 ring-line'} ${!r.enabled ? 'opacity-50' : ''}`}>
                   <span className="flex min-w-0 items-center gap-2">
                     {h ? <Check size={13} aria-hidden="true" /> : <span className="h-3 w-3 rounded-full border border-ink/20" aria-hidden="true" />}
                     <span className="truncate">{h?.label ?? r.label}{!r.enabled ? ' (off)' : ''}</span>
                   </span>
-                  <span className={`font-mono text-[12px] ${h ? 'text-white' : ''}`}>{r.weight > 0 ? '+' : ''}{r.weight}</span>
-                </motion.div>
+                  <span className={`font-mono text-[12px] ${h ? 'text-white' : ''}`}>{r.weight > 0 ? `+${r.weight}` : signed(r.weight)}</span>
+                </div>
               );
             })}
           </div>
         </div>
 
         <div className="flex flex-col gap-3">
-          <span className="label">Ranked candidates{result ? ` · quality for ${language === 'es' ? 'Spanish' : 'English'} ${result.turn_type} turns` : ''}</span>
+          <span className="label">Ranked candidates{result ? ` · quality for ${result.turn_type} turns` : ''}</span>
           <LayoutGroup>
             <ol className="flex flex-col gap-1.5">
               {ranked.map((c) => (
@@ -210,7 +225,7 @@ function PolicyEditor({ initial, models, onSaved }: { initial: CustomerPolicy[];
         {policies.map((p) => {
           const ok = allowed(p);
           return (
-            <motion.div layout key={p.id} className="flex flex-col gap-3 rounded-2xl bg-canvas p-4 ring-1 ring-line">
+            <div key={p.id} className="flex flex-col gap-3 rounded-2xl bg-canvas p-4 ring-1 ring-line">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[15px] font-medium">{p.name}</span>
                 <span className="text-[12px] text-ink-3">{ok.length} of {models.length} models allowed</span>
@@ -230,14 +245,14 @@ function PolicyEditor({ initial, models, onSaved }: { initial: CustomerPolicy[];
                   {models.map((m) => {
                     const yes = ok.includes(m);
                     return (
-                      <motion.span key={m.id} layout animate={{ opacity: yes ? 1 : 0.35 }} transition={base} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] ring-1 ${yes ? 'ring-line' : 'line-through ring-transparent'}`} style={{ color: yes ? undefined : '#6b645e' }}>
+                      <motion.span key={m.id} initial={false} animate={{ opacity: yes ? 1 : 0.35 }} transition={base} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] ring-1 ${yes ? 'ring-line' : 'line-through ring-transparent'}`} style={{ color: yes ? undefined : '#6b645e' }}>
                         <span className="h-2 w-2 rounded-full" style={{ background: modelColor(m) }} aria-hidden="true" /> {m.name}
                       </motion.span>
                     );
                   })}
                 </AnimatePresence>
               </div>
-            </motion.div>
+            </div>
           );
         })}
       </div>
@@ -284,11 +299,15 @@ function LanguageEditor({ initial, onSaved }: { initial: LanguagePref[]; onSaved
     update(p.language, { vendorOrder: next });
   };
   return (
-    <Card title="Language preferences" right={<>{note}<Button size="sm" icon={Save} onClick={() => save(langs)} loading={saving}>Save languages</Button></>}>
+    // Kept per language so one can be added back; while English is the only one, the card doesn't name languages.
+    <Card
+      title={LANGS.length > 1 ? 'Language preferences' : 'Floor and tie-breaks'}
+      subtitle="An optional stricter quality floor for simple turns, and which vendor wins when two models tie."
+      right={<>{note}<Button size="sm" icon={Save} onClick={() => save(langs)} loading={saving}>Save</Button></>}>
       <div className="flex flex-col gap-5">
         {langs.map((p) => (
           <div key={p.language} className="flex flex-col gap-2.5">
-            <span className="text-[15px] font-medium">{LANGS.find((l) => l.value === p.language)?.label}</span>
+            {LANGS.length > 1 ? <span className="text-[15px] font-medium">{LANGS.find((l) => l.value === p.language)?.label}</span> : null}
             <Field className="max-w-[220px]" label="Simple-turn floor" placeholder="global floor" inputMode="decimal" value={p.qualityFloor === null ? '' : String(p.qualityFloor)} onChange={(e) => update(p.language, { qualityFloor: e.target.value.trim() === '' ? null : Number(e.target.value) })} />
             <span className="label">Tie-break vendor order (click to move up)</span>
             <LayoutGroup id={`order-${p.language}`}>
@@ -309,19 +328,38 @@ function LanguageEditor({ initial, onSaved }: { initial: LanguagePref[]; onSaved
 
 function RulesEditor({ initial, onSaved }: { initial: ClassifierRule[]; onSaved: () => void }) {
   const [rules, setRulesRaw] = useState(initial);
-  const { save, saving, note, markDirty } = useSaver<ClassifierRule[]>('/routing/rules', (rules) => ({ rules }), onSaved);
+  // The number boxes keep what was typed, so "-" on the way to "-3" (or an empty box) isn't turned into 0 on the spot.
+  const [text, setTextRaw] = useState<Record<string, string>>(() =>
+    Object.fromEntries(initial.flatMap((r) => [[`${r.id}:weight`, String(r.weight)], ...(r.words !== undefined ? [[`${r.id}:words`, String(r.words)]] : [])])),
+  );
+  const { save, saving, note, markDirty, fail } = useSaver<ClassifierRule[]>('/routing/rules', (rules) => ({ rules }), onSaved);
   const setRules = (v: ClassifierRule[]) => { markDirty(); setRulesRaw(v); };
   const update = (id: string, patch: Partial<ClassifierRule>) => setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const setText = (key: string, value: string) => { markDirty(); setTextRaw((t) => ({ ...t, [key]: value })); };
+  const num = (key: string) => (text[key]?.trim() && Number.isFinite(Number(text[key])) ? Number(text[key]) : null);
+  // An empty or non-numeric box is an error, never a silent 0. Nothing is saved until every box is valid.
+  const commit = () => {
+    for (const r of rules) {
+      if (num(`${r.id}:weight`) === null) return fail(`${r.label}: weight needs a number`);
+      if (r.words !== undefined && (num(`${r.id}:words`) === null || num(`${r.id}:words`)! < 0)) return fail(`${r.label}: words needs a number`);
+    }
+    save(rules.map((r) => ({
+      ...r,
+      weight: num(`${r.id}:weight`)!,
+      ...(r.words !== undefined ? { words: num(`${r.id}:words`)! } : {}),
+      phrases: r.phrases?.filter(Boolean),
+    })));
+  };
   return (
-    <Card title="Classifier rules" subtitle="Weighted signals; their sum decides simple vs complex." right={<>{note}<Button size="sm" icon={Save} onClick={() => save(rules.map((r) => ({ ...r, phrases: r.phrases?.filter(Boolean) })))} loading={saving}>Save rules</Button></>}>
+    <Card title="Classifier rules" subtitle="Weighted signals; their sum decides simple vs complex. A negative weight pulls a turn towards simple." right={<>{note}<Button size="sm" icon={Save} onClick={commit} loading={saving}>Save rules</Button></>}>
       <div className="flex flex-col divide-y divide-line">
         {rules.map((r) => (
           <div key={r.id} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <Toggle checked={r.enabled} onChange={(enabled) => update(r.id, { enabled })} label={r.label} />
               <div className="flex gap-2">
-                {r.words !== undefined ? <Field className="w-[96px]" label="Words" inputMode="numeric" value={String(r.words)} onChange={(e) => update(r.id, { words: Number(e.target.value) || 0 })} /> : null}
-                <Field className="w-[96px]" label="Weight" inputMode="numeric" value={String(r.weight)} onChange={(e) => update(r.id, { weight: Number(e.target.value) || 0 })} />
+                {r.words !== undefined ? <Field className="w-[96px]" label="Words" inputMode="numeric" value={text[`${r.id}:words`] ?? ''} onChange={(e) => setText(`${r.id}:words`, e.target.value)} /> : null}
+                <Field className="w-[96px]" label="Weight" inputMode="text" value={text[`${r.id}:weight`] ?? ''} onChange={(e) => setText(`${r.id}:weight`, e.target.value)} />
               </div>
             </div>
             {r.phrases ? <TextArea label="Phrases (comma-separated)" value={r.phrases.join(', ')} onChange={(e) => update(r.id, { phrases: e.target.value.split(',').map((p) => p.trim()) })} rows={2} /> : null}

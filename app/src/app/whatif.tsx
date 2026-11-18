@@ -89,7 +89,12 @@ export default function WhatIfScreen() {
               </Row>
               <Muted>{saving ? 'saving' : 'increase'}</Muted>
             </View>
-            <Stat label="Quality on moved traffic" value={`${result.qualityFrom.toFixed(2)} → ${result.qualityTo.toFixed(2)}`} hint={result.qualityTo < result.qualityFrom ? 'lower quality' : 'same or better'} />
+            {/* Both are null when the move shifts no traffic. */}
+            <Stat
+              label="Quality on moved traffic"
+              value={result.qualityFrom === null || result.qualityTo === null ? '—' : `${result.qualityFrom.toFixed(2)} → ${result.qualityTo.toFixed(2)}`}
+              hint={result.qualityFrom === null || result.qualityTo === null ? 'no traffic moves' : result.qualityTo < result.qualityFrom ? 'lower quality' : 'same or better'}
+            />
             <Stat label="Traffic moved" value={pct(result.movedTurnsPct, 1)} hint="of all logged turns" />
             <Stat label="Blocked by policy" value={pct(result.blockedPct, 0)} hint={`can't move to ${nameOf(to)}`} />
           </StatGrid>

@@ -1,7 +1,7 @@
 import type { Language, Overview, Savings, TurnType, WhatIfRequest, WhatIfResult } from '../../shared/types.ts';
 import { db } from './db.ts';
 import { costOf } from './providers.ts';
-import { policyBlock, policyFor } from './router.ts';
+import { bestAllowedModel, policyBlock, policyFor } from './router.ts';
 import type { Workspace } from './store.ts';
 
 const DAY = 86_400_000;
@@ -223,16 +223,6 @@ export async function savings(ws: Workspace, days = 14): Promise<Savings> {
   const since = Date.now() - days * DAY;
   const rows = await buckets(ws, since);
 
-  // "Best" uses the same per-language, per-turn-type quality the router ranks complex turns by,
-  // so the baseline and the routed choice are judged on the same scale.
-  const bestFor = (customerId: string, language: Language, turnType: TurnType) => {
-    const policy = policyFor(ws, customerId);
-    const seg = `${language}:${turnType}`;
-    return ws.models
-      .filter((m) => m.enabled && !m.excluded && m.languages.includes(language) && !policyBlock(m, policy))
-      .sort((a, b) => ws.effectiveQuality(b, seg) - ws.effectiveQuality(a, seg))[0];
-  };
-
   let actual = 0;
   let baseline = 0;
   let turns = 0;
@@ -240,7 +230,7 @@ export async function savings(ws: Workspace, days = 14): Promise<Savings> {
   const baselineModels = new Map<string, number>();
   for (const b of rows) {
     const m = ws.getModel(b.model_id);
-    const best = bestFor(b.customer_id, b.language, b.turn_type);
+    const best = bestAllowedModel(ws, b.customer_id, b.language, b.turn_type);
     if (!m || !best) {
       uncovered += b.n;
       continue;
