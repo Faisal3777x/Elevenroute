@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
 import type {
@@ -322,7 +324,9 @@ function authorized(req: IncomingMessage, password: string): boolean {
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
-  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
 };
 
 /** A file inside root for this URL path, or null. Never resolves outside root. */
@@ -342,15 +346,38 @@ async function staticFile(root: string, pathname: string): Promise<string | null
   }
 }
 
-async function sendFile(res: ServerResponse, file: string, immutable: boolean) {
-  res.writeHead(200, {
-    'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+/**
+ * Streams a file. Honours a single byte range (206), which browsers need to play and seek video (Safari won't play an
+ * MP4 without it), and sends a Last-Modified so a revisit can be answered with 304 instead of the whole file.
+ */
+async function sendFile(req: IncomingMessage, res: ServerResponse, file: string, immutable: boolean) {
+  const { size, mtime } = await stat(file);
+  const modified = mtime.toUTCString();
+  const headers: Record<string, string | number> = {
+    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
     'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+    'last-modified': modified,
+    'accept-ranges': 'bytes',
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'DENY',
     'referrer-policy': 'no-referrer',
-  });
-  res.end(await readFile(file));
+  };
+  if (req.headers['if-modified-since'] === modified && !req.headers.range) return void res.writeHead(304, headers).end();
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+  let start = 0;
+  let end = size - 1;
+  let status = 200;
+  if (range && (range[1] || range[2])) {
+    start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start >= size || start > end) return void res.writeHead(416, { 'content-range': `bytes */${size}` }).end();
+    status = 206;
+    headers['content-range'] = `bytes ${start}-${end}/${size}`;
+  }
+  headers['content-length'] = size === 0 ? 0 : end - start + 1;
+  res.writeHead(status, headers);
+  if (size === 0) return void res.end();
+  await pipeline(createReadStream(file, { start, end }), res).catch(() => res.destroy());
 }
 
 /** Arrived through a tunnel or reverse proxy (Cloudflare adds cf-connecting-ip; others add forwarding headers). */
@@ -388,9 +415,9 @@ export function createApp(options: AppOptions = {}): Server {
     if (path === '/api' || path.startsWith('/api/')) path = path.slice(4) || '/';
     else if (webDir && req.method === 'GET') {
       const file = await staticFile(webDir, path);
-      if (file) return void (await sendFile(res, file, path.startsWith('/assets/')));
+      if (file) return void (await sendFile(req, res, file, path.startsWith('/assets/')));
       // Page loads and refreshes (e.g. /providers) get the app; API clients asking for JSON fall through.
-      if ((req.headers.accept ?? '').includes('text/html')) return void (await sendFile(res, resolve(webDir, 'index.html'), false));
+      if ((req.headers.accept ?? '').includes('text/html')) return void (await sendFile(req, res, resolve(webDir, 'index.html'), false));
     }
 
     try {

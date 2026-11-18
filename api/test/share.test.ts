@@ -13,6 +13,7 @@ const webDir = mkdtempSync(join(tmpdir(), 'elevenroute-web-'));
 mkdirSync(join(webDir, 'assets'));
 writeFileSync(join(webDir, 'index.html'), '<!doctype html><title>ElevenRoute</title>');
 writeFileSync(join(webDir, 'assets', 'app-123.js'), 'console.log(1)');
+writeFileSync(join(webDir, 'promo.mp4'), Buffer.from(Array.from({ length: 1000 }, (_, i) => i % 256)));
 
 const server = createApp({ password: 'team-secret-1', webDir });
 let base = '';
@@ -71,6 +72,28 @@ test('share mode: serves the dashboard, its assets and page refreshes; API stays
   assert.ok(Array.isArray(await data.json()));
   const prefixed = await fetch(`${base}/api/providers`, { headers: { ...auth, accept: 'text/html' } });
   assert.ok(Array.isArray(await prefixed.json()));
+});
+
+test('share mode: video is served as video/mp4 with byte ranges, so every browser can play and seek it', async () => {
+  const full = await fetch(`${base}/promo.mp4`, { headers: auth });
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get('content-type'), 'video/mp4');
+  assert.equal(full.headers.get('accept-ranges'), 'bytes');
+  assert.equal((await full.arrayBuffer()).byteLength, 1000);
+
+  const part = await fetch(`${base}/promo.mp4`, { headers: { ...auth, range: 'bytes=100-199' } });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get('content-range'), 'bytes 100-199/1000');
+  const bytes = new Uint8Array(await part.arrayBuffer());
+  assert.equal(bytes.length, 100);
+  assert.equal(bytes[0], 100);
+
+  const tail = await fetch(`${base}/promo.mp4`, { headers: { ...auth, range: 'bytes=-10' } });
+  assert.equal(tail.headers.get('content-range'), 'bytes 990-999/1000');
+  assert.equal((await fetch(`${base}/promo.mp4`, { headers: { ...auth, range: 'bytes=5000-' } })).status, 416);
+
+  const again = await fetch(`${base}/promo.mp4`, { headers: { ...auth, 'if-modified-since': full.headers.get('last-modified') ?? '' } });
+  assert.equal(again.status, 304);
 });
 
 test('share mode: never serves files outside the dashboard folder', async () => {
