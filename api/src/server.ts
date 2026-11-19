@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -11,7 +11,9 @@ import { AGENT_SCENARIO_IDS, agentScenarios, agentTurn } from './agent.ts';
 import { AuthError, authEnabled, canUseLiveMode, demoOnly, userFromRequest } from './auth.ts';
 import { runTurn } from './chat.ts';
 import { LANGUAGES, TEST_CASES, USE_CASES } from './content.ts';
-import { backend } from './db.ts';
+import { backend, db } from './db.ts';
+import { ALL, clientIp, HEAVY, hit, WRITES } from './limits.ts';
+import { createSandbox, deleteSandbox, findSandbox, isAdmin, SandboxError, sandboxesEnabled, touchSandbox, visitorId } from './sandbox.ts';
 import { clearTests, listAlerts, listResults, listRuns, runTests } from './evaluation.ts';
 import { decide } from './router.ts';
 import { overview, savings, whatIf, whatIfBaseline } from './stats.ts';
@@ -57,15 +59,33 @@ function str(value: unknown, field: string, max = 2000): string {
   return value;
 }
 
+/** A number within [min, max] (whole when `int`), or a 400. */
+function num(value: unknown, field: string, min: number, max: number, int = false): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max || (int && !Number.isInteger(value))) {
+    throw new HttpError(400, `${field} must be ${int ? 'a whole number ' : ''}between ${min} and ${max}`);
+  }
+  return value;
+}
+/** An array of at most `max` items, or a 400. */
+function list(value: unknown, field: string, max: number): unknown[] {
+  if (!Array.isArray(value)) throw new HttpError(400, `${field} must be an array`);
+  if (value.length > max) throw new HttpError(400, `${field} can have at most ${max} items`);
+  return value;
+}
+/** customer_id picks a routing policy; unknown ids fall back to the default one. Kept short: it is logged on every turn. */
+const customerId = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 60) : 'default');
+
 function chatRequest(b: Body): ChatRequest {
   return {
     conversation_id: typeof b.conversation_id === 'string' && b.conversation_id ? b.conversation_id.slice(0, 100) : crypto.randomUUID(),
     message: str(b.message, 'message'),
     language: oneOf<Language>(b.language ?? 'en', LANGUAGES, 'language'),
     use_case: oneOf<UseCase>(b.use_case ?? 'faq', USE_CASES, 'use_case'),
-    customer_id: typeof b.customer_id === 'string' ? b.customer_id : 'default',
+    customer_id: customerId(b.customer_id),
   };
 }
+
+const MAX_MODELS = 40;
 
 const MODEL_NUMBERS = ['costIn', 'costOut', 'latencyMs', 'errorRate', 'quality'] as const;
 const MODEL_RANGES: Record<(typeof MODEL_NUMBERS)[number], { min: number; max: number; label: string }> = {
@@ -85,6 +105,8 @@ function applyModelFields(m: ModelInfo, b: Body): void {
     if (!Number.isFinite(v) || v < r.min || v > r.max) throw new HttpError(400, `${r.label} must be between ${r.min} and ${r.max}`);
     nums[k] = v;
   }
+  if (typeof b.name === 'string' && b.name.trim().length > 80) throw new HttpError(400, 'name can be at most 80 characters');
+  if (typeof b.liveModel === 'string' && b.liveModel.trim().length > 100) throw new HttpError(400, 'liveModel can be at most 100 characters');
   Object.assign(m, nums);
   if (typeof b.name === 'string' && b.name.trim()) m.name = b.name.trim();
   if (typeof b.liveModel === 'string' && b.liveModel.trim()) m.liveModel = b.liveModel.trim();
@@ -129,7 +151,7 @@ function agentRequest(ws: Workspace, body: Body): AgentTurnRequest {
     session_id: str(body.session_id, 'session_id', 100),
     scenario: oneOf(body.scenario, AGENT_SCENARIO_IDS, 'scenario'),
     language: oneOf<Language>(body.language ?? 'en', LANGUAGES, 'language'),
-    customer_id: typeof body.customer_id === 'string' ? body.customer_id : 'default',
+    customer_id: customerId(body.customer_id),
     message: str(body.message, 'message'),
   };
   const session = ws.agentSessions.get(req.session_id);
@@ -172,6 +194,7 @@ route('GET', '/providers', ({ ws }) => ws.models);
 route('POST', '/providers', async ({ body, ws }) => {
   const id = str(body.id, 'id', 60).toLowerCase().replace(/[^a-z0-9.-]/g, '-');
   if (ws.models.some((m) => m.id === id)) throw new HttpError(409, `model ${id} already exists`);
+  if (ws.models.length >= MAX_MODELS) throw new HttpError(400, `A workspace can have at most ${MAX_MODELS} models`);
   const m: ModelInfo = {
     id, name: str(body.name, 'name', 80), vendor: oneOf(body.vendor, VENDORS, 'vendor'), tier: 'fast', liveModel: id,
     regions: ['US'], languages: [...LANGUAGES], costIn: 0.001, costOut: 0.004, latencyMs: 800, errorRate: 0.01, quality: 0.8,
@@ -220,7 +243,8 @@ route('PUT', '/routing/strategy', async ({ body, ws }) => {
   const s = ws.strategy as unknown as Record<string, number | boolean>;
   const next: Record<string, number | boolean> = {};
   for (const [k, v] of Object.entries(body)) {
-    if (!(k in s)) continue;
+    // Own fields only: `in` would also accept inherited names such as "toString" or "constructor".
+    if (!Object.hasOwn(s, k)) continue;
     if (typeof s[k] === 'boolean') {
       if (typeof v !== 'boolean') throw new HttpError(400, `invalid value for ${k}`);
       next[k] = v;
@@ -237,36 +261,55 @@ route('PUT', '/routing/strategy', async ({ body, ws }) => {
   return ws.strategy as Strategy;
 });
 route('PUT', '/routing/rules', async ({ body, ws }) => {
-  if (!Array.isArray(body.rules)) throw new HttpError(400, 'rules must be an array');
-  for (const r of body.rules as Partial<ClassifierRule>[]) {
-    const rule = ws.rules.find((x) => x.id === r.id);
-    if (!rule) continue;
-    if (typeof r.weight === 'number' && Number.isFinite(r.weight)) rule.weight = r.weight;
-    if (typeof r.enabled === 'boolean') rule.enabled = r.enabled;
-    if (typeof r.words === 'number' && r.words > 0) rule.words = r.words;
-    if (Array.isArray(r.phrases)) rule.phrases = r.phrases.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim());
+  const rules = list(body.rules, 'rules', 100) as Partial<ClassifierRule>[];
+  // Validate every rule before changing any, so a bad one never leaves a half-applied edit.
+  const edits = rules.map((r) => {
+    const rule = r && typeof r === 'object' ? ws.rules.find((x) => x.id === r.id) : undefined;
+    if (!rule) return null;
+    const phrases = r.phrases === undefined ? undefined : list(r.phrases, 'phrases', 200)
+      .filter((p): p is string => typeof p === 'string' && Boolean(p.trim()))
+      .map((p) => {
+        if (p.trim().length > 100) throw new HttpError(400, 'Each phrase can be at most 100 characters');
+        return p.trim();
+      });
+    return {
+      rule,
+      weight: r.weight === undefined ? undefined : num(r.weight, 'Rule weight', -20, 20),
+      enabled: typeof r.enabled === 'boolean' ? r.enabled : undefined,
+      words: r.words === undefined ? undefined : num(r.words, 'Word count', 1, 1000),
+      phrases,
+    };
+  });
+  for (const e of edits) {
+    if (!e) continue;
+    if (e.weight !== undefined) e.rule.weight = e.weight;
+    if (e.enabled !== undefined) e.rule.enabled = e.enabled;
+    if (e.words !== undefined) e.rule.words = e.words;
+    if (e.phrases) e.rule.phrases = e.phrases;
   }
   await ws.save('rules');
   return ws.rules;
 });
 route('PUT', '/routing/policies', async ({ body, ws }) => {
-  if (!Array.isArray(body.policies)) throw new HttpError(400, 'policies must be an array');
-  ws.policies = (body.policies as CustomerPolicy[]).map((p) => ({
-    id: str(p.id, 'id', 60),
-    name: str(p.name, 'name', 80),
-    allowedVendors: Array.isArray(p.allowedVendors) ? p.allowedVendors.filter((v) => VENDORS.includes(v)) : null,
-    region: p.region === 'US' || p.region === 'EU' ? p.region : null,
-    qualityFloor: typeof p.qualityFloor === 'number' ? p.qualityFloor : null,
-    note: typeof p.note === 'string' ? p.note : '',
-  }));
+  ws.policies = (list(body.policies, 'policies', 50) as CustomerPolicy[]).map((p) => {
+    if (!p || typeof p !== 'object') throw new HttpError(400, 'each policy must be an object');
+    if (typeof p.note === 'string' && p.note.length > 300) throw new HttpError(400, 'A policy note can be at most 300 characters');
+    return {
+      id: str(p.id, 'id', 60),
+      name: str(p.name, 'name', 80),
+      allowedVendors: Array.isArray(p.allowedVendors) ? p.allowedVendors.filter((v) => VENDORS.includes(v)) : null,
+      region: p.region === 'US' || p.region === 'EU' ? p.region : null,
+      qualityFloor: p.qualityFloor === null || p.qualityFloor === undefined ? null : num(p.qualityFloor, 'Quality floor', 0, 1),
+      note: typeof p.note === 'string' ? p.note : '',
+    };
+  });
   await ws.save('policies');
   return ws.policies;
 });
 route('PUT', '/routing/languages', async ({ body, ws }) => {
-  if (!Array.isArray(body.languages)) throw new HttpError(400, 'languages must be an array');
-  ws.languages = (body.languages as LanguagePref[]).map((l) => ({
-    language: oneOf(l.language, LANGUAGES, 'language'),
-    qualityFloor: typeof l.qualityFloor === 'number' ? l.qualityFloor : null,
+  ws.languages = (list(body.languages, 'languages', 10) as LanguagePref[]).map((l) => ({
+    language: oneOf(l?.language, LANGUAGES, 'language'),
+    qualityFloor: l.qualityFloor === null || l.qualityFloor === undefined ? null : num(l.qualityFloor, 'Quality floor', 0, 1),
     vendorOrder: Array.isArray(l.vendorOrder) ? l.vendorOrder.filter((v) => VENDORS.includes(v)) : [...VENDORS],
   }));
   await ws.save('languages');
@@ -276,26 +319,46 @@ route('PUT', '/routing/languages', async ({ body, ws }) => {
 route('POST', '/tests/run', ({ ws }) => runTests(ws));
 route('POST', '/tests/clear', ({ ws }) => clearTests(ws));
 route('GET', '/tests/cases', () => TEST_CASES);
-route('GET', '/tests/results', ({ query, ws }) => listResults(ws, query.get('run') ? Number(query.get('run')) : undefined));
+route('GET', '/tests/results', ({ query, ws }) => {
+  const run = query.get('run');
+  if (run && !/^\d{1,9}$/.test(run)) throw new HttpError(400, 'run must be a test run id');
+  return listResults(ws, run ? Number(run) : undefined);
+});
 route('GET', '/tests/runs', ({ ws }) => listRuns(ws));
 route('GET', '/alerts', ({ ws }) => listAlerts(ws));
 
-route('POST', '/traffic/generate', ({ body, ws }) => generateTraffic(ws, Math.min(2000, Math.max(1, Number(body.count) || 500))));
+/** Turns a visitor's sandbox may hold before generating more traffic is refused (about ten "Generate traffic" clicks). */
+const SANDBOX_MAX_TURNS = 20_000;
+route('POST', '/traffic/generate', async ({ body, ws }) => {
+  if (ws.sandboxOf) {
+    const { n } = (await db.one<{ n: number }>('select count(*)::int as n from turns where workspace_id = $1', [ws.id]))!;
+    if (n >= SANDBOX_MAX_TURNS) throw new HttpError(409, 'That is plenty of traffic. Reset traffic first, then generate more.');
+  }
+  return generateTraffic(ws, Math.min(2000, Math.max(1, Number(body.count) || 500)));
+});
 route('GET', '/traffic/status', ({ ws }) => trafficStatus(ws));
 route('POST', '/traffic/clear', ({ ws }) => clearTraffic(ws));
 
 route('POST', '/reset', async ({ ws }) => {
-  await ws.reset();
+  // A visitor's "Reset everything" deletes their sandbox, which puts them back on the shared demo's starting data.
+  if (ws.sandboxOf) await deleteSandbox(ws);
+  else await ws.reset();
   return { ok: true };
 });
 
 // ---- server ----
+/** The largest request body accepted. The biggest real one (every routing rule with its phrases) is a few kilobytes. */
+const MAX_BODY = 64 * 1024;
+
 async function readBody(req: IncomingMessage): Promise<Body> {
-  let raw = '';
-  for await (const chunk of req) {
-    raw += chunk;
-    if (raw.length > 1_000_000) throw new HttpError(413, 'body too large');
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > MAX_BODY) throw new HttpError(413, 'body too large');
+    chunks.push(chunk);
   }
+  const raw = Buffer.concat(chunks).toString('utf8');
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -358,10 +421,8 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, file: string,
     'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
     'last-modified': modified,
     'accept-ranges': 'bytes',
-    'x-content-type-options': 'nosniff',
-    'x-frame-options': 'DENY',
-    'referrer-policy': 'no-referrer',
   };
+  if (headers['content-type'].toString().startsWith('text/html')) headers['content-security-policy'] = contentSecurityPolicy(file);
   if (req.headers['if-modified-since'] === modified && !req.headers.range) return void res.writeHead(304, headers).end();
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
   let start = 0;
@@ -379,6 +440,67 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, file: string,
   if (size === 0) return void res.end();
   await pipeline(createReadStream(file, { start, end }), res).catch(() => res.destroy());
 }
+
+// ---- security headers ----
+
+/**
+ * Content-Security-Policy for an HTML page: scripts only from this site plus the page's own inline scripts (allowed by
+ * hash, computed from the built file so it always matches), nothing from other sites except the YouTube ad option and
+ * Supabase sign-in, no plugins, and no framing by other sites. Blocks injected scripts even if one ever slipped in.
+ */
+const cspCache = new Map<string, { mtime: number; csp: string }>();
+function contentSecurityPolicy(file: string): string {
+  const mtime = statSync(file).mtimeMs;
+  const cached = cspCache.get(file);
+  if (cached && cached.mtime === mtime) return cached.csp;
+  const html = readFileSync(file, 'utf8');
+  const hashes = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
+    // Browsers hash the script text after turning CRLF into LF (files built on Windows have CRLF).
+    .map((m) => `'sha256-${createHash('sha256').update(m[1].replace(/\r\n?/g, '\n')).digest('base64')}'`);
+  const csp = [
+    "default-src 'self'",
+    `script-src 'self' ${hashes.join(' ')}`.trim(),
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https://i.ytimg.com",
+    "media-src 'self' blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+    'frame-src https://www.youtube-nocookie.com https://www.youtube.com',
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+  cspCache.set(file, { mtime, csp });
+  return csp;
+}
+
+/** Origins allowed to call the API from a browser (CORS_ORIGINS, comma-separated). Unset: any origin (local development). */
+const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
+
+function setCommonHeaders(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin;
+  if (!corsOrigins.length) res.setHeader('access-control-allow-origin', '*');
+  else if (origin && corsOrigins.includes(origin)) res.setHeader('access-control-allow-origin', origin);
+  res.setHeader('vary', 'Origin');
+  res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('access-control-allow-headers', 'content-type, authorization, x-visitor-id, x-admin-token');
+  res.setHeader('access-control-max-age', '600');
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'DENY');
+  res.setHeader('referrer-policy', 'strict-origin-when-cross-origin');
+  res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  res.setHeader('cross-origin-opener-policy', 'same-origin');
+  res.setHeader('cross-origin-resource-policy', 'same-origin');
+  // HTTPS only (the hosted site): browsers then refuse plain-HTTP connections to the site for a year.
+  if (req.headers['x-forwarded-proto'] === 'https') res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains');
+}
+
+/** POSTs that change nothing (dry runs and simulations): they can run against the shared demo. Mirrors web/src/lib/api.ts. */
+const READ_ONLY_POSTS = new Set(['/route/preview', '/whatif/simulate', '/agent/preview']);
+/** Expensive or destructive calls, limited harder (limits.ts HEAVY). */
+const HEAVY_PATHS = new Set(['/traffic/generate', '/traffic/clear', '/tests/run', '/tests/clear', '/reset']);
 
 /** Arrived through a tunnel or reverse proxy (Cloudflare adds cf-connecting-ip; others add forwarding headers). */
 const proxied = (req: IncomingMessage) => ['cf-connecting-ip', 'cf-ray', 'x-forwarded-for', 'forwarded'].some((h) => h in req.headers);
@@ -398,9 +520,7 @@ export interface AppOptions {
 export function createApp(options: AppOptions = {}): Server {
   const webDir = options.webDir ? resolve(options.webDir) : undefined;
   return createServer(async (req, res) => {
-    res.setHeader('access-control-allow-origin', '*');
-    res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('access-control-allow-headers', 'content-type, authorization');
+    setCommonHeaders(req, res);
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
 
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -421,16 +541,45 @@ export function createApp(options: AppOptions = {}): Server {
     }
 
     try {
+      const ip = clientIp(req);
+      const admin = isAdmin(req);
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = r.pattern.exec(path);
         if (!m) continue;
-        const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+        let params: Record<string, string>;
+        try {
+          params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+        } catch {
+          throw new HttpError(400, 'malformed URL');
+        }
+        const writes = req.method !== 'GET' && !READ_ONLY_POSTS.has(path);
+        if (!r.open && !admin) {
+          const wait = hit(ALL, ip) || (writes ? hit(WRITES, ip) : 0) || (HEAVY_PATHS.has(path) ? hit(HEAVY, ip) : 0);
+          if (wait) {
+            res.setHeader('retry-after', String(wait));
+            return send(res, 429, { error: `Too many requests. Try again in ${wait} s.` });
+          }
+        }
         let user = null as unknown as AuthUser;
         let ws = null as unknown as Workspace;
         if (!r.open) {
           user = await userFromRequest(req);
           ws = await openWorkspace(await workspaceIdFor(user));
+          // Open access: the shared demo is read-only to the public; each visitor's changes go to their own sandbox.
+          if (sandboxesEnabled && !admin) {
+            const visitor = visitorId(req);
+            const sandbox = visitor ? await findSandbox(visitor) : null;
+            if (sandbox) {
+              ws = await openWorkspace(sandbox);
+              touchSandbox(sandbox);
+            } else if (writes) {
+              if (!visitor) throw new HttpError(403, 'Open the site in a browser to make changes.');
+              // Nothing of theirs to reset yet: they are already on the starting data.
+              if (path === '/reset') return send(res, 200, { ok: true });
+              ws = await openWorkspace(await createSandbox(ws, visitor, ip));
+            }
+          }
           // A workspace left in live mode by someone who may no longer use it (e.g. DEMO_ONLY) drops back to demo.
           if (ws.mode === 'live' && !canUseLiveMode(user)) {
             ws.mode = 'demo';
@@ -442,9 +591,10 @@ export function createApp(options: AppOptions = {}): Server {
       }
       send(res, 404, { error: `no route for ${req.method} ${path}` });
     } catch (err) {
-      const status = err instanceof AuthError ? 401 : err instanceof HttpError ? err.status : 500;
+      const status = err instanceof AuthError ? 401 : err instanceof HttpError || err instanceof SandboxError ? err.status : 500;
       if (status === 500) console.error(err);
-      send(res, status, { error: err instanceof Error ? err.message : 'internal error' });
+      // Unexpected errors stay in the server log: their messages can name tables, files or code.
+      send(res, status, { error: status === 500 ? 'Something went wrong on the server. Try again.' : err instanceof Error ? err.message : 'Request failed' });
     }
   });
 }

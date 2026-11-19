@@ -11,11 +11,38 @@ export const API_BASE =
 
 export class ApiError extends Error {}
 
+// Mirrored in api/src/server.ts: these run against the shared demo without giving the visitor a sandbox.
 const READ_ONLY_POSTS = new Set(['/route/preview', '/whatif/simulate', '/agent/preview']);
+
+/**
+ * A random id this browser keeps (localStorage). On the open public site the API gives each visitor id a private
+ * sandbox, so one visitor's edits and resets never touch what others see. Made from getRandomValues, which also works
+ * on plain-HTTP LAN links where crypto.randomUUID is unavailable.
+ */
+function newVisitorId(): string {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+let visitor: string | null = null;
+function visitorId(): string {
+  if (visitor) return visitor;
+  try {
+    const saved = localStorage.getItem('er-visitor');
+    if (saved && /^[0-9a-f-]{36}$/.test(saved)) return (visitor = saved);
+    visitor = newVisitorId();
+    localStorage.setItem('er-visitor', visitor);
+  } catch {
+    visitor ??= newVisitorId();
+  }
+  return visitor;
+}
 
 async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const token = await accessToken();
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { 'x-visitor-id': visitorId() };
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (token) headers.authorization = `Bearer ${token}`;
 

@@ -75,7 +75,11 @@ export async function runTests(ws: Workspace): Promise<TestRun> {
   const judged = await pool(jobs, mode === 'demo' ? 64 : 6);
 
   const prev = await db.one<{ scores: Record<string, number> }>('select scores from test_runs where workspace_id = $1 order by id desc limit 1', [ws.id]);
-  const prevScores = prev?.scores ?? {};
+  let prevScores: Record<string, number> = prev?.scores ?? {};
+  if (typeof prevScores === 'string') {
+    // Saved double-encoded before the ::text::jsonb fix (Supabase).
+    try { prevScores = JSON.parse(prevScores); } catch { prevScores = {}; }
+  }
   const ts = Date.now();
 
   const scores: Record<string, number> = {};
@@ -102,7 +106,7 @@ export async function runTests(ws: Workspace): Promise<TestRun> {
   });
 
   const runId = await db.tx(async (q) => {
-    const id = (await q.one<{ id: number }>('insert into test_runs (workspace_id, ts, mode, scores) values ($1, $2, $3, $4::jsonb) returning id', [ws.id, ts, mode, JSON.stringify(scores)]))!.id;
+    const id = (await q.one<{ id: number }>('insert into test_runs (workspace_id, ts, mode, scores) values ($1, $2, $3, $4::text::jsonb) returning id', [ws.id, ts, mode, JSON.stringify(scores)]))!.id;
     await insertMany(
       q,
       'test_results',
@@ -123,7 +127,14 @@ export async function runTests(ws: Workspace): Promise<TestRun> {
 }
 
 export async function listRuns(ws: Workspace): Promise<TestRun[]> {
-  return db.query<TestRun>('select id, ts, mode, scores from test_runs where workspace_id = $1 order by id desc limit 20', [ws.id]);
+  const runs = await db.query<TestRun>('select id, ts, mode, scores from test_runs where workspace_id = $1 order by id desc limit 20', [ws.id]);
+  // Runs saved on Supabase before the ::text::jsonb fix hold their scores double-encoded, as a JSON string: unwrap them.
+  for (const r of runs) {
+    if (typeof r.scores === 'string') {
+      try { r.scores = JSON.parse(r.scores); } catch { /* keep as stored */ }
+    }
+  }
+  return runs;
 }
 
 export async function listResults(ws: Workspace, runId?: number): Promise<TestResult[]> {

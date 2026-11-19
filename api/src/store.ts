@@ -33,6 +33,8 @@ export class Workspace {
   readonly agentSessions = new Map<string, AgentSession>();
 
   readonly id: string;
+  /** The shared demo this workspace was copied from, when it is a visitor's private sandbox (sandbox.ts). */
+  sandboxOf: string | null = null;
 
   constructor(id: string) {
     this.id = id;
@@ -89,8 +91,14 @@ export function openWorkspace(id: string): Promise<Workspace> {
   return ws;
 }
 
+/** Drops a workspace from the in-process cache (after it was deleted). */
+export function forgetWorkspace(id: string): void {
+  cache.delete(id);
+}
+
 async function load(id: string): Promise<Workspace> {
   const ws = new Workspace(id);
+  ws.sandboxOf = (await db.one<{ sandbox_of: string | null }>('select sandbox_of from workspaces where id = $1', [id]))?.sandbox_of ?? null;
   const rows = await db.query<{ key: SettingKey; value: unknown }>('select key, value from workspace_settings where workspace_id = $1', [id]);
   for (const r of rows) {
     if (!(SETTING_KEYS as readonly string[]).includes(r.key)) continue;

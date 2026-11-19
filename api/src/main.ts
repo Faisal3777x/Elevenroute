@@ -30,11 +30,16 @@ if (webDir && !existsSync(resolve(webDir, 'index.html'))) {
 
 const requirePasswordLocally = process.env.REQUIRE_PASSWORD_LOCALLY === '1';
 
+// Open access (sign-in off + DEMO_ONLY): visitors' private sandboxes, deleted once idle.
+const { sandboxesEnabled, startSandboxCleanup } = await import('./sandbox.ts');
+if (sandboxesEnabled) startSandboxCleanup();
+
 createApp({ password, requirePasswordLocally, webDir }).listen(port, host, () => {
   const where = `http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`;
   const guard = password && !authEnabled ? (requirePasswordLocally ? ', password required' : ', password required on the public link') : '';
   console.log(`ElevenRoute API on ${where}${guard}`);
   console.log(`  Database: ${backend === 'supabase' ? 'Supabase Postgres (DATABASE_URL)' : 'local embedded Postgres in api/data/pglite'}`);
   console.log(`  Sign-in: ${authEnabled ? 'Supabase Auth (SUPABASE_URL)' : 'OFF - every request acts as one local user. Set SUPABASE_URL to require sign-in.'}`);
+  if (sandboxesEnabled) console.log(`  Open access: the shared demo is read-only; each visitor's changes go to a private sandbox${process.env.ADMIN_TOKEN ? '' : ' (no ADMIN_TOKEN set, so nobody can edit the shared demo)'}`);
   if (webDir) console.log(`Web dashboard on ${where}`);
 });

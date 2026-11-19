@@ -21,6 +21,13 @@ services:
       # Open access without sign-in: everyone shares one workspace, so live mode (real, paid model calls) stays locked.
       - key: DEMO_ONLY
         value: "1"
+      # With DEMO_ONLY and sign-in off, the shared demo is read-only to visitors (each gets a private sandbox).
+      # Only requests carrying this token may change it. Entered only in Render's dashboard, like DATABASE_URL.
+      - key: ADMIN_TOKEN
+        sync: false
+      # The only browser origins allowed to call the API.
+      - key: CORS_ORIGINS
+        value: "https://elevenroute.com,https://www.elevenroute.com,https://elevenroute.onrender.com"
       # A few connections are plenty for one instance and leave room in the Supabase session pooler.
       - key: DB_POOL_SIZE
         value: "5"
