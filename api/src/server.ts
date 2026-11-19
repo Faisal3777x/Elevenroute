@@ -543,6 +543,11 @@ export function createApp(options: AppOptions = {}): Server {
     try {
       const ip = clientIp(req);
       const admin = isAdmin(req);
+      // Admin-only diagnostic: which address the rate limits see, and the forwarding headers the host sends.
+      if (admin && path === '/admin/client-ip') {
+        const fwd = Object.fromEntries(Object.entries(req.headers).filter(([k]) => /forwarded|client-ip|real-ip|connecting-ip|^cf-|^rndr-|^true-/i.test(k)));
+        return send(res, 200, { ip, socket: req.socket.remoteAddress, headers: fwd });
+      }
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = r.pattern.exec(path);
