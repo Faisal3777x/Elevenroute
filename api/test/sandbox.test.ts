@@ -3,6 +3,9 @@
 process.env.DB_PATH = ':memory:';
 process.env.DEMO_ONLY = '1';
 process.env.ADMIN_TOKEN = 'test-admin-token-0123456789abcdef0123456789';
+// Small limits so the tests can reach them quickly.
+process.env.RATE_LIMIT_PER_MIN = '300';
+process.env.SANDBOXES_PER_IP_PER_DAY = '5';
 delete process.env.SUPABASE_URL;
 
 import assert from 'node:assert/strict';

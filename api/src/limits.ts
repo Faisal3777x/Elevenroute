@@ -22,12 +22,15 @@ export interface Limit {
 }
 
 const MIN = 60_000;
-/** Any API call. Generous: the dashboard polls, and the landing page's demos send a request every few seconds. */
-export const ALL: Limit = { name: 'all', max: Number(process.env.RATE_LIMIT_PER_MIN) || 300, windowMs: MIN };
-/** Anything that changes data (chat turns, edits). A person types far slower than this. */
-export const WRITES: Limit = { name: 'writes', max: 60, windowMs: MIN };
+// Limits are per address, and everyone on one Wi-Fi (a classroom, an office) shares an address. One visitor on the
+// landing page makes about 64 calls a minute (its live demos), so these leave room for ~40 people behind one address
+// while still stopping a script that floods the server.
+/** Any API call. */
+export const ALL: Limit = { name: 'all', max: Number(process.env.RATE_LIMIT_PER_MIN) || 3000, windowMs: MIN };
+/** Anything that changes data (chat turns, agent turns, edits). */
+export const WRITES: Limit = { name: 'writes', max: 600, windowMs: MIN };
 /** Heavy jobs: generating traffic, running the test suite, resets. */
-export const HEAVY: Limit = { name: 'heavy', max: 10, windowMs: 10 * MIN };
+export const HEAVY: Limit = { name: 'heavy', max: 60, windowMs: 10 * MIN };
 
 const counters = new Map<string, { n: number; reset: number }>();
 

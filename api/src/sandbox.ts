@@ -19,7 +19,8 @@ export const sandboxesEnabled = !authEnabled && demoOnly;
 const HOUR = 3_600_000;
 const TTL_MS = (Number(process.env.SANDBOX_TTL_HOURS) || 48) * HOUR;
 const MAX_SANDBOXES = Number(process.env.MAX_SANDBOXES) || 300;
-const PER_IP_PER_DAY = Number(process.env.SANDBOXES_PER_IP_PER_DAY) || 5;
+// Per address, and a classroom shares one: room for a class, while MAX_SANDBOXES bounds the total.
+const PER_IP_PER_DAY = Number(process.env.SANDBOXES_PER_IP_PER_DAY) || 40;
 
 export class SandboxError extends Error {
   status: number;
