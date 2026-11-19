@@ -55,7 +55,7 @@ export class Workspace {
   async save(...keys: SettingKey[]): Promise<void> {
     for (const key of keys) {
       await db.query(
-        `insert into workspace_settings (workspace_id, key, value) values ($1, $2, $3::jsonb)
+        `insert into workspace_settings (workspace_id, key, value) values ($1, $2, $3::text::jsonb)
          on conflict (workspace_id, key) do update set value = excluded.value, updated_at = now()`,
         [this.id, key, JSON.stringify(this[key])],
       );
@@ -92,7 +92,16 @@ export function openWorkspace(id: string): Promise<Workspace> {
 async function load(id: string): Promise<Workspace> {
   const ws = new Workspace(id);
   const rows = await db.query<{ key: SettingKey; value: unknown }>('select key, value from workspace_settings where workspace_id = $1', [id]);
-  for (const r of rows) if ((SETTING_KEYS as readonly string[]).includes(r.key)) (ws as any)[r.key] = r.value;
+  for (const r of rows) {
+    if (!(SETTING_KEYS as readonly string[]).includes(r.key)) continue;
+    // Supabase (postgres.js) used to store these double-encoded, as a JSON string holding JSON: unwrap those rows.
+    // `mode` is legitimately a string ("demo"), so only unwrap strings that parse to an object or array.
+    let value = r.value;
+    if (typeof value === 'string' && /^\s*[[{]/.test(value)) {
+      try { value = JSON.parse(value); } catch { /* keep as stored */ }
+    }
+    (ws as any)[r.key] = value;
+  }
   ws.strategy = { ...clone(seedStrategy), ...ws.strategy };
   return ws;
 }
