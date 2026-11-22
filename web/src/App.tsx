@@ -13,6 +13,7 @@ import { useApi } from './lib/useApi';
 
 const SignIn = lazy(() => import('./pages/SignIn'));
 const Landing = lazy(() => import('./pages/Landing'));
+const About = lazy(() => import('./pages/About'));
 const AdFilm = lazy(() => import('./pages/AdFilm'));
 
 const Overview = lazy(() => import('./pages/Overview'));
@@ -43,6 +44,15 @@ export function App() {
           element={
             <Suspense fallback={<div className="min-h-dvh" aria-busy="true" />}>
               <Landing />
+            </Suspense>
+          }
+        />
+        {/* About Us: who built ElevenRoute. Public and black, like the landing page. */}
+        <Route
+          path="/about"
+          element={
+            <Suspense fallback={<div className="min-h-dvh" aria-busy="true" />}>
+              <About />
             </Suspense>
           }
         />

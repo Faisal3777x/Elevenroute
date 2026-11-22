@@ -10,11 +10,12 @@
     <meta name="description" content="ElevenRoute routes every AI conversation turn to the right model, fails over when providers break, and shows what it costs." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>ElevenRoute</title>
-    <!-- The landing page is black: paint it black before any script or stylesheet arrives, so it never flashes white
-         while loading. Landing.tsx keeps the class (and the status-bar colour) while it is open and removes both on leave. -->
+    <!-- The public pages (landing, About Us) are black: paint them black before any script or stylesheet arrives, so
+         they never flash white while loading. useDarkPage (components/Site.tsx) keeps the class and the status-bar
+         colour while one is open and removes both on leave. -->
     <style>html.landing-dark, html.landing-dark body { background-color: #09090a; }</style>
     <script>
-      if (location.pathname === '/') {
+      if (location.pathname === '/' || location.pathname === '/about') {
         document.documentElement.classList.add('landing-dark');
         document.querySelector('meta[name="theme-color"]').setAttribute('content', '#09090a');
       }

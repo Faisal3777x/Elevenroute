@@ -1,7 +1,7 @@
 import { animate, createTimeline, stagger, svg, utils } from 'animejs';
-import { ArrowRight, ArrowUpRight, Bot, MessagesSquare, Pause, Play, ServerCrash, SkipForward, Split, Wallet, type LucideIcon } from 'lucide-react';
-import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform } from 'motion/react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ArrowUpRight, Bot, MessagesSquare, Pause, Play, ServerCrash, SkipForward, Split, Wallet, type LucideIcon } from 'lucide-react';
+import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform, type Variants } from 'motion/react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import type { AppConfig, ModelInfo, Overview, PreviewResponse, Savings, TestCase } from '../../../shared/types';
@@ -9,6 +9,7 @@ import { AgentStage } from '../components/AgentStage';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 import { BrandOrb, Orb } from '../components/Orb';
 import { PromoSlot } from '../components/PromoSlot';
+import { CtaLink, Glow, Reveal, SectionTitle, SitePage, useDarkPage, useMedia, useScale } from '../components/Site';
 import { TurnBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { useOnScreen } from '../lib/anime';
@@ -27,35 +28,8 @@ import { useApi } from '../lib/useApi';
 const STEP_MS = 3800;
 const HUB = 112;
 
-/** Static film grain (SVG turbulence), tiled. */
-const GRAIN = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
-
-/**
- * Size factor for very large screens. Must match the html.landing-dark font sizes in index.css: the page's rem-based
- * layout grows with them, and this scales what is drawn in pixels (orbs, the logo) by the same amount.
- */
-const scaleFor = (w: number) => (w >= 3400 ? 34 / 16 : w >= 2560 ? 26 / 16 : w >= 1920 ? 20 / 16 : 1);
-function useScale(): number {
-  const [k, setK] = useState(() => scaleFor(window.innerWidth));
-  useEffect(() => {
-    const on = () => setK(scaleFor(window.innerWidth));
-    window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
-  }, []);
-  return k;
-}
-
 /** Blended price per 1k tokens, the same weighting the router uses (about 3 input tokens per output token). */
 const blended = (m: ModelInfo) => (3 * m.costIn + m.costOut) / 4;
-
-/** Where the footer leads: the dashboard pages a visitor is most likely to want next. */
-const FOOTER_LINKS = [
-  { to: '/overview', label: 'Overview' },
-  { to: '/agent', label: 'ElevenAgent' },
-  { to: '/playground', label: 'Playground' },
-  { to: '/rules', label: 'Routing rules' },
-  { to: '/tests', label: 'Test results' },
-];
 
 export default function Landing() {
   const { enabled, session } = useAuth();
@@ -63,33 +37,17 @@ export default function Landing() {
   const canFetch = !enabled || Boolean(session);
   const config = useApi<AppConfig>(canFetch ? '/config' : null);
 
-  // Arriving from a scrolled dashboard page, start at the top (unless the link points at a section of this page).
-  useLayoutEffect(() => {
-    if (!window.location.hash) window.scrollTo({ top: 0, behavior: 'instant' });
-  }, []);
-
-  // Black theme for this page only: the page behind it (overscroll, body) goes black while it is open.
+  useDarkPage('ElevenRoute · Smart where it matters. Cheap where it doesn’t.');
+  // Arriving from another page by a link to one of this page's sections (/#live): go straight to it.
   useEffect(() => {
-    document.title = 'ElevenRoute · Smart where it matters. Cheap where it doesn’t.';
-    document.documentElement.classList.add('landing-dark');
-    // Black status bar while the black page is open (index.html already sets both when the site opens here).
-    const theme = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    theme?.setAttribute('content', '#09090a');
-    return () => {
-      document.documentElement.classList.remove('landing-dark');
-      theme?.setAttribute('content', '#fdfcfc'); // the dashboard's canvas colour
-    };
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id) document.getElementById(id)?.scrollIntoView({ behavior: 'instant', block: 'start' });
   }, []);
 
   const k = useScale();
 
   return (
-    <div className="theme-dark relative min-h-dvh overflow-x-clip">
-      {/* Film grain: a plain low-opacity layer. No blend mode, which would make the browser re-blend the whole screen
-          on every frame of every animation underneath it. */}
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[60] opacity-[0.03]" style={{ backgroundImage: GRAIN, backgroundSize: '220px 220px' }} />
-      <TopBar />
-
+    <SitePage home>
       <main id="main">
         <Hero />
 
@@ -125,75 +83,146 @@ export default function Landing() {
           </div>
         </Reveal>
       </main>
-
-      <footer className="mx-auto flex max-w-[77.5rem] flex-col gap-5 px-4 pt-8 pb-12 text-[0.8125rem] text-ink-3 sm:px-8 md:flex-row md:items-center md:justify-between">
-        <Link to="/" className="flex w-fit items-center gap-2 rounded-xl text-ink-2" aria-label="ElevenRoute home">
-          <BrandOrb size={Math.round(20 * k)} outline />
-          ElevenRoute
-        </Link>
-        <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
-          {FOOTER_LINKS.map((l) => (
-            <Link key={l.to} to={l.to} className="rounded transition-[color,opacity] hover:text-ink active:opacity-60">{l.label}</Link>
-          ))}
-        </nav>
-      </footer>
-    </div>
-  );
-}
-
-// ---------- page chrome ----------
-function TopBar() {
-  const k = useScale();
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const on = () => setScrolled(window.scrollY > 8);
-    on();
-    window.addEventListener('scroll', on, { passive: true });
-    return () => window.removeEventListener('scroll', on);
-  }, []);
-  const anchor = 'hidden rounded-full px-3 py-2 text-[0.875rem] text-ink-2 transition-[color,opacity] hover:text-ink active:opacity-60 md:inline-block';
-  return (
-    // The blur only exists once there is something under the bar to blur (backdrop filters cost a repaint per frame).
-    <header className={`landing-bar sticky top-0 z-40 border-b transition-colors duration-300 ${scrolled ? 'border-line bg-canvas/80 backdrop-blur' : 'border-transparent bg-canvas/0'}`}>
-      <div className="mx-auto flex h-16 max-w-[77.5rem] items-center justify-between gap-4 px-4 sm:px-8">
-        <Link to="/" className="flex items-center gap-2.5 rounded-xl" aria-label="ElevenRoute home">
-          <BrandOrb size={Math.round(30 * k)} live beat outline />
-          <span className="h-display text-[1.375rem]">ElevenRoute</span>
-        </Link>
-        <nav aria-label="Landing" className="flex items-center gap-1 sm:gap-2">
-          {PROMO ? <a href="#film" className={anchor}>Watch</a> : null}
-          <a href="#live" className={anchor}>See it live</a>
-          <a href="#why" className={anchor}>Why it pays</a>
-          <CtaLink to="/overview" size="sm">Open dashboard</CtaLink>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
-/**
- * Soft brand-coloured light that drifts and breathes very slowly (`.glow-drift`: a CSS loop on the compositor, so
- * it costs no script; stopped under reduced motion). `period` and `delay` keep two glows from moving in step.
- */
-function Glow({ className = '', period = 22, delay = 0 }: { className?: string; period?: number; delay?: number }) {
-  return (
-    <div
-      aria-hidden="true"
-      className={`glow-drift pointer-events-none absolute rounded-full ${className}`}
-      style={{ background: 'radial-gradient(closest-side, rgb(122 92 255 / 0.22), rgb(63 193 180 / 0.10) 55%, transparent)', '--glow-period': `${period}s`, '--glow-delay': `${-delay}s` } as CSSProperties}
-    />
+    </SitePage>
   );
 }
 
 /** The line to remember, one sentence per line. */
 const HEADLINE = ['Smart where it matters.', 'Cheap where it doesn’t.'];
 
+// ---------- the caller behind "Play a live call" ----------
+// The person on the line, previewed by the orb: one soft ripple leaves its outer ring, like the first movement of a
+// voice, and the caller's opening line fades in, word by word. Silent, and it never delays the link.
+// - Wide screens with a mouse: the big hero orb speaks while "Play a live call" is hovered or keyboard-focused.
+// - Everywhere else (phones, tablets, touch screens): a small orb by the buttons (or the big one, on a wide touch
+//   screen) speaks once as the hero finishes arriving, and the line stays; hovering or focusing the button sends
+//   another ripple. A tap goes straight to the call.
+// - Reduced motion: the line is simply there, with no ripple.
+
+/** The refund call's opening complaint, in the customer's own words. */
+const CALLER_LINE = '“I’ve been charged twice.”';
+/** The big orb shows from xl (HeroOrb); below that the small one in CallerRow. */
+const BIG_ORB = '(min-width: 80rem)';
+const MOUSE = '(hover: hover) and (pointer: fine)';
+/** The caller speaks once the hero's entrance has landed (about 0.8 s). */
+const INTRO_MS = 950;
+
+function useCaller(reduce: boolean) {
+  const big = useMedia(BIG_ORB);
+  const mouse = useMedia(MOUSE);
+  const onHover = big && mouse && !reduce;
+  const input = useRef({ hover: false, focus: false });
+  const on = useRef(false);
+  const [hovering, setHovering] = useState(false);
+  const [intro, setIntro] = useState(false);
+  const [pulse, setPulse] = useState(0);
+
+  // Where the line doesn't wait for the pointer, the caller speaks once, after the hero has arrived.
+  useEffect(() => {
+    if (reduce || onHover || intro) return;
+    const t = setTimeout(() => {
+      setIntro(true);
+      setPulse((p) => p + 1);
+    }, INTRO_MS);
+    return () => clearTimeout(t);
+  }, [reduce, onHover, intro]);
+
+  const sync = () => {
+    const now = input.current.hover || input.current.focus;
+    if (now === on.current) return;
+    on.current = now;
+    setHovering(now);
+    if (now && !reduce) setPulse((p) => p + 1);
+  };
+  const handlers = {
+    onPointerEnter: (e: ReactPointerEvent<HTMLAnchorElement>) => {
+      if (e.pointerType !== 'mouse') return; // a tap goes straight to the call
+      input.current.hover = true;
+      sync();
+    },
+    onPointerLeave: () => {
+      input.current.hover = false;
+      sync();
+    },
+    // Keyboard focus only: a mouse press also focuses the link, but that click is already navigating.
+    onFocus: (e: FocusEvent<HTMLAnchorElement>) => {
+      input.current.focus = e.currentTarget.matches(':focus-visible');
+      sync();
+    },
+    onBlur: () => {
+      input.current.focus = false;
+      sync();
+    },
+  };
+  // Under reduced motion the line is always there; otherwise it shows while hovered (big orb and a mouse) or from
+  // the intro on.
+  const speaking = reduce || (onHover ? hovering : intro);
+  return { speaking, pulse, handlers };
+}
+
+/** Each word of the caption arrives a beat after the last, the way speech does; it leaves all at once. */
+const WORD: Variants = {
+  hide: { opacity: 0, y: 4, transition: { duration: 0.2, ease: EASE } },
+  show: { opacity: 1, y: 0, transition: { duration: 0.32, ease: EASE } },
+};
+
+/**
+ * The caller's line. Its space is always kept (empty while silent), so nothing moves when it fills: one centred line
+ * under the big orb, or a label over the words beside the small one.
+ */
+function CallerWords({ speaking, id, stacked = false }: { speaking: boolean; id?: string; stacked?: boolean }) {
+  const words = CALLER_LINE.split(' ');
+  return (
+    <motion.p
+      id={id}
+      initial={false}
+      animate={speaking ? 'show' : 'hide'}
+      // The words start as the ripple passes the ring.
+      variants={{ show: { transition: { delayChildren: 0.14, staggerChildren: 0.07 } }, hide: {} }}
+      className={stacked ? 'flex min-w-0 flex-col items-start' : 'mt-7 flex h-7 items-center justify-center gap-2.5 whitespace-nowrap'}>
+      <motion.span variants={WORD} className="text-[0.6875rem] font-medium tracking-[0.08em] text-ink-3 uppercase">Caller</motion.span>
+      <span className={stacked ? 'mt-0.5 text-[1.0625rem] leading-snug text-ink' : 'text-[1.125rem] text-ink'}>
+        {words.map((w, i) => (
+          <motion.span key={i} variants={WORD} className="inline-block whitespace-pre">
+            {w}{i < words.length - 1 ? ' ' : ''}
+          </motion.span>
+        ))}
+      </span>
+    </motion.p>
+  );
+}
+
+/** One ripple per "start speaking": keyed by its count, so each one plays the keyframes once. */
+function Ripple({ pulse, to }: { pulse: number; to?: number }) {
+  if (!pulse) return null;
+  return <span key={pulse} aria-hidden="true" className="voice-ring caller-ripple pointer-events-none absolute inset-0 rounded-full" style={to ? ({ '--ripple-to': to } as CSSProperties) : undefined} />;
+}
+
+/**
+ * Phones, tablets and small laptops have no room for the big orb, so a small one sits under the buttons with the
+ * caller's line beside it, like an incoming call.
+ */
+function CallerRow({ k, speaking, pulse }: { k: number; speaking: boolean; pulse: number }) {
+  const size = Math.round(52 * k);
+  return (
+    <div className="mt-6 flex items-center gap-4 xl:hidden">
+      <span aria-hidden="true" className="relative shrink-0" style={{ width: size, height: size }}>
+        <BrandOrb size={size} live beat outline />
+        {/* On a small orb the ripple travels further, so it reads at the same size as the big one's. */}
+        <Ripple pulse={pulse} to={1.9} />
+      </span>
+      <CallerWords id="caller-line" speaking={speaking} stacked />
+    </div>
+  );
+}
+
 /**
  * The brand mark, large and alive: its three provider lights circle the black sphere. It leans a little towards the
  * pointer (a soft spring, mouse only) and drifts up and dims as the page scrolls past it, so the hero has depth.
- * Transforms and opacity only; with reduced motion it simply sits still.
+ * Transforms and opacity only; with reduced motion it simply sits still. While the caller is about to speak (see
+ * useCallerPreview) one ripple leaves its outer ring, a warm light gathers behind it, and their line shows below.
  */
-function HeroOrb({ k }: { k: number }) {
+function HeroOrb({ k, speaking, pulse }: { k: number; speaking: boolean; pulse: number }) {
   const reduce = useReducedMotion() ?? false;
   const px = useMotionValue(0);
   const py = useMotionValue(0);
@@ -215,19 +244,26 @@ function HeroOrb({ k }: { k: number }) {
     return () => window.removeEventListener('pointermove', on);
   }, [reduce, px, py]);
 
+  const size = Math.round(320 * k);
   return (
     <div aria-hidden="true" className="hero-orb-scroll pointer-events-none absolute top-24 right-10 hidden xl:block">
-      {/* The halo moves against the orb, which reads as depth. */}
-      <motion.div className="absolute -inset-16 rounded-full" style={{ ...(reduce ? {} : { x: glowX, y: glowY }), background: 'radial-gradient(closest-side, rgb(122 92 255 / 0.26), rgb(63 193 180 / 0.08) 60%, transparent)' }} />
-      {/* Decoration in the hero's entrance: it fades in with the headline and doesn't move on its way in. */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.9, ease: EASE }}
-        style={reduce ? undefined : { x, y }}
-        className="relative rounded-full">
-        <BrandOrb size={Math.round(320 * k)} live beat outline ping />
-      </motion.div>
+      <div className="relative" style={{ width: size, height: size }}>
+        {/* The halo moves against the orb, which reads as depth. */}
+        <motion.div className="absolute -inset-16 rounded-full" style={{ ...(reduce ? {} : { x: glowX, y: glowY }), background: 'radial-gradient(closest-side, rgb(122 92 255 / 0.26), rgb(63 193 180 / 0.08) 60%, transparent)' }} />
+        {/* A warmer light gathers while someone is about to speak (opacity only). */}
+        <div className={`absolute -inset-12 rounded-full transition-opacity duration-500 ease-out ${speaking ? 'opacity-100' : 'opacity-0'}`} style={{ background: 'radial-gradient(closest-side, rgb(255 106 43 / 0.14), rgb(122 92 255 / 0.10) 55%, transparent)' }} />
+        {/* Decoration in the hero's entrance: it fades in with the headline and doesn't move on its way in. */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.9, ease: EASE }}
+          style={reduce ? undefined : { x, y }}
+          className="relative rounded-full">
+          <BrandOrb size={size} live beat outline ping />
+          <Ripple pulse={pulse} />
+        </motion.div>
+      </div>
+      <CallerWords speaking={speaking} />
     </div>
   );
 }
@@ -241,10 +277,11 @@ function Hero() {
   const k = useScale();
   const reduce = useReducedMotion() ?? false;
   const at = (s: number) => (reduce ? 0 : s);
+  const caller = useCaller(reduce);
   return (
     <section className="relative mx-auto max-w-[77.5rem] px-4 pt-[clamp(2rem,6svh,5rem)] pb-6 sm:px-8">
       <Glow className="-top-32 right-[-7.5rem] h-[38.75rem] w-[38.75rem]" />
-      <HeroOrb k={k} />
+      <HeroOrb k={k} speaking={caller.speaking} pulse={caller.pulse} />
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -282,9 +319,10 @@ function Hero() {
           ElevenAgent runs the whole customer call and remembers every detail. ElevenRoute picks the AI model for each turn, and switches provider the moment one fails.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <CtaLink to="/agent">Play a live call</CtaLink>
+          <CtaLink to="/agent" aria-describedby="caller-line" {...caller.handlers}>Play a live call</CtaLink>
           <CtaLink href="#live" variant="secondary">Watch it route</CtaLink>
         </div>
+        <CallerRow k={k} speaking={caller.speaking} pulse={caller.pulse} />
       </motion.div>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, delay: at(0.27), ease: EASE }} className="relative mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 text-[0.875rem] text-ink-2">
         <span className="text-ink-3">Every turn, across</span>
@@ -320,9 +358,10 @@ function Live({ canFetch, sample, k }: { canFetch: boolean; sample: boolean; k: 
           {TABS.map((t) => {
             const on = t.id === tab;
             return (
-              <button key={t.id} type="button" role="tab" aria-selected={on} aria-controls="live-panel" onClick={() => setTab(t.id)} className="press relative inline-flex h-10 items-center gap-2 rounded-full px-4 text-[0.875rem] font-medium">
+              // One line each on a phone: tighter padding, and the icons only from sm up.
+              <button key={t.id} type="button" role="tab" aria-selected={on} aria-controls="live-panel" onClick={() => setTab(t.id)} className="press relative inline-flex h-10 items-center gap-2 rounded-full px-3.5 text-[0.8125rem] font-medium whitespace-nowrap sm:px-4 sm:text-[0.875rem]">
                 <span className={`relative z-[1] inline-flex items-center gap-2 transition-colors duration-200 ${on ? 'text-canvas' : 'text-ink-2 hover:text-ink'}`}>
-                  <t.icon size="1rem" aria-hidden="true" />
+                  <t.icon size="1rem" aria-hidden="true" className="hidden sm:block" />
                   {t.label}
                 </span>
               </button>
@@ -444,12 +483,45 @@ function Figure({ value, format, label, tone }: { value: number; format: (n: num
 
 // ---------- the live stage ----------
 type Pt = { x: number; y: number };
-type Geo = { w: number; h: number; inP: Pt; hubL: Pt; hubR: Pt; models: Record<string, Pt> };
+/**
+ * Where the connections run, measured from the stage. Wide screens read left to right: message → router → models,
+ * joined by curves. Narrow screens stack them, so a rail runs down from the message through the router, and a short
+ * branch turns off it into each model.
+ */
+type Geo =
+  | { kind: 'wide'; w: number; h: number; inP: Pt; hubL: Pt; hubR: Pt; models: Record<string, Pt> }
+  | { kind: 'rail'; w: number; h: number; x: number; inY: number; hubTop: number; hubBottom: number; models: Record<string, Pt> };
 
 const curve = (a: Pt, b: Pt) => {
   const dx = (b.x - a.x) * 0.5;
   return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
 };
+/** How the rail bends into a branch. */
+const BEND = 12;
+const branch = (x: number, from: number, to: Pt) => `M${x},${from} L${x},${to.y - BEND} Q${x},${to.y} ${x + BEND},${to.y} L${to.x},${to.y}`;
+
+/** The message's way into the router. */
+const inPath = (g: Geo) => (g.kind === 'wide' ? curve(g.inP, g.hubL) : `M${g.x},${g.inY} L${g.x},${g.hubTop}`);
+/** The way out to one model (the dot's path, then the light's). */
+const outPath = (g: Geo, id: string | undefined) => {
+  const m = id ? g.models[id] : undefined;
+  if (!m) return null;
+  return g.kind === 'wide' ? curve(g.hubR, m) : branch(g.x, g.hubBottom, m);
+};
+/** The faint lines to every model: a fan of curves, or one rail with a branch per model. */
+function fanPaths(g: Geo, ids: string[]): { key: string; d: string }[] {
+  const at = ids.filter((id) => g.models[id]);
+  if (g.kind === 'wide') return at.map((id) => ({ key: id, d: curve(g.hubR, g.models[id]) }));
+  if (!at.length) return [];
+  const last = Math.max(...at.map((id) => g.models[id].y));
+  return [
+    { key: 'rail', d: `M${g.x},${g.hubBottom} L${g.x},${last - BEND}` },
+    ...at.map((id) => {
+      const m = g.models[id];
+      return { key: id, d: `M${g.x},${m.y - BEND} Q${g.x},${m.y} ${g.x + BEND},${m.y} L${m.x},${m.y}` };
+    }),
+  ];
+}
 
 /** Alternate simple and complex turns so the loop shows both routes. */
 function interleave(cases: TestCase[]): TestCase[] {
@@ -514,14 +586,14 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
     return () => clearTimeout(t);
   }, [playing, ready, step, onScreen]);
 
-  // Geometry for the connecting curves (wide screens only), measured relative to the stage.
+  // Geometry for the connections, measured relative to the stage (a fan on wide screens, a rail on narrow ones).
   const stageRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dotRef = useRef<SVGGElement>(null);
   const [geo, setGeo] = useState<Geo | null>(null);
   const measure = useCallback(() => {
     const st = stageRef.current;
-    if (!st || !wide) return setGeo(null);
+    if (!st) return setGeo(null);
     const b = st.getBoundingClientRect();
     const at = (el: Element | null, side: 'l' | 'r'): Pt | null => {
       if (!el) return null;
@@ -529,15 +601,24 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
       return { x: (side === 'l' ? r.left : r.right) - b.left, y: r.top + r.height / 2 - b.top };
     };
     const hub = st.querySelector('[data-anchor="hub"]');
+    const ms: Record<string, Pt> = {};
+    st.querySelectorAll<HTMLElement>('[data-anchor-model]').forEach((el) => {
+      const p = at(el, 'l')!;
+      ms[el.dataset.anchorModel!] = wide ? p : { x: p.x - 3, y: p.y };
+    });
+    if (!wide) {
+      // The rail runs down through the router's centre, from under the incoming message to the last model.
+      const box = st.querySelector('[data-anchor="in-box"]')?.getBoundingClientRect();
+      const h = hub?.getBoundingClientRect();
+      if (!box || !h) return setGeo(null);
+      // It starts behind the message card (cards paint over the lines), so the dot drops out from under it.
+      return setGeo({ kind: 'rail', w: b.width, h: b.height, x: h.left + h.width / 2 - b.left, inY: (box.top + box.bottom) / 2 - b.top, hubTop: h.top - b.top - 6, hubBottom: h.bottom - b.top + 6, models: ms });
+    }
     const inP = at(st.querySelector('[data-anchor="in"]'), 'r');
     const hubL = at(hub, 'l');
     const hubR = at(hub, 'r');
     if (!inP || !hubL || !hubR) return setGeo(null);
-    const ms: Record<string, Pt> = {};
-    st.querySelectorAll<HTMLElement>('[data-anchor-model]').forEach((el) => {
-      ms[el.dataset.anchorModel!] = at(el, 'l')!;
-    });
-    setGeo({ w: b.width, h: b.height, inP: { x: inP.x + 6, y: inP.y }, hubL: { x: hubL.x - 6, y: hubL.y }, hubR: { x: hubR.x + 6, y: hubR.y }, models: ms });
+    setGeo({ kind: 'wide', w: b.width, h: b.height, inP: { x: inP.x + 6, y: inP.y }, hubL: { x: hubL.x - 6, y: hubL.y }, hubR: { x: hubR.x + 6, y: hubR.y }, models: ms });
   }, [wide]);
 
   useEffect(() => {
@@ -620,7 +701,7 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
   const decision = shownCase ? previews[shownCase.id] : undefined;
   const pickedId = decision?.ranked[0];
   const incoming = n ? [0, 1, 2].filter((k) => step - k >= 0).map((k) => ({ key: step - k, tc: queue[(step - k) % n] })) : [];
-  const outD = geo && chosenId && geo.models[chosenId] ? curve(geo.hubR, geo.models[chosenId]) : null;
+  const outD = geo ? outPath(geo, chosenId) : null;
 
   return (
     <div ref={screenRef} className="relative rounded-[1.75rem] bg-card p-4 ring-1 ring-line sm:p-6 lg:p-8">
@@ -655,9 +736,9 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
       <div ref={stageRef} className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center lg:gap-20">
         {geo ? (
           <svg ref={svgRef} width={geo.w} height={geo.h} className="pointer-events-none absolute inset-0 overflow-visible" aria-hidden="true">
-            {models.map((m) => (geo.models[m.id] ? <path key={m.id} data-fan d={curve(geo.hubR, geo.models[m.id])} fill="none" style={{ stroke: 'color-mix(in srgb, var(--color-ink) 20%, transparent)' }} strokeWidth={1.25} /> : null))}
+            {fanPaths(geo, models.map((m) => m.id)).map((p) => <path key={p.key} data-fan d={p.d} fill="none" style={{ stroke: 'color-mix(in srgb, var(--color-ink) 20%, transparent)' }} strokeWidth={1.25} />)}
             <AnimatePresence>
-              <motion.path key={`in${step}`} data-in={step} d={curve(geo.inP, geo.hubL)} fill="none" style={{ stroke: 'var(--color-ink)' }} strokeOpacity={0.35} strokeWidth={1.5} strokeLinecap="round" exit={{ opacity: 0, transition: { duration: 0.3 } }} />
+              <motion.path key={`in${step}`} data-in={step} d={inPath(geo)} fill="none" style={{ stroke: 'var(--color-ink)' }} strokeOpacity={0.35} strokeWidth={1.5} strokeLinecap="round" exit={{ opacity: 0, transition: { duration: 0.3 } }} />
               {outD ? <motion.path key={`out${step}`} data-out={step} d={outD} fill="none" style={{ stroke: 'var(--color-ink)' }} strokeWidth={2} strokeLinecap="round" exit={{ opacity: 0, transition: { duration: 0.35 } }} /> : null}
               {outD ? <motion.path key={`light${step}`} data-light={step} d={outD} fill="none" style={{ stroke: 'var(--color-canvas)' }} strokeWidth={2} strokeLinecap="round" exit={{ opacity: 0, transition: { duration: 0.2 } }} /> : null}
             </AnimatePresence>
@@ -671,7 +752,7 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
         {/* Incoming messages */}
         <div className="relative">
           <div className="label mb-3">Incoming</div>
-          <div className="relative h-[5.75rem] overflow-hidden lg:h-[18.75rem]">
+          <div data-anchor="in-box" className="relative h-[5.75rem] overflow-hidden lg:h-[18.75rem]">
             <span data-anchor="in" className="absolute top-[2.75rem] right-0 h-0 w-0" aria-hidden="true" />
             <AnimatePresence initial={false} mode="popLayout">
               {incoming.map(({ key, tc }, i) => (
@@ -696,7 +777,7 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
 
         {/* The router */}
         <div className="flex items-center gap-5 lg:flex-col lg:gap-4">
-          <div data-anchor="hub" className="relative ml-3 shrink-0 lg:ml-0" style={{ width: hub, height: hub }}>
+          <div data-anchor="hub" className="relative shrink-0" style={{ width: hub, height: hub }}>
             <div data-hub-pulse className="h-full w-full">
               <BrandOrb size={hub} live ping drift={false} />
             </div>
@@ -716,8 +797,8 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
           </div>
         </div>
 
-        {/* Models */}
-        <div>
+        {/* Models. On narrow screens they sit to the right of the rail, which branches into each one. */}
+        <div className="pl-16 lg:pl-0">
           <div className="label mb-3">Models</div>
           <ul className="flex flex-col gap-1.5">
             {models.map((m) => {
@@ -751,53 +832,4 @@ function Stage({ canFetch, sample }: { canFetch: boolean; sample: boolean }) {
       {sample ? <p className="mt-6 text-[0.75rem] text-ink-3">Sample data: quality scores, prices and latencies are illustrative settings, not live measurements.</p> : null}
     </div>
   );
-}
-
-// ---------- small pieces ----------
-/**
- * A landing section that rises in once, as it scrolls into view. It only flags itself (`data-in`); the entrance is
- * CSS (`.reveal` in index.css, compositor-only): the first child leads and travels furthest, the rest follow with
- * shrinking gaps, `.fine` print only fades, and a `.reveal-cascade` inside flows in item by item.
- */
-function Reveal({ children, className = '', id, as = 'section' }: { children: ReactNode; className?: string; id?: string; as?: 'section' | 'div' }) {
-  const [el, setEl] = useState<HTMLElement | null>(null);
-  const [inView, setInView] = useState(false);
-  useEffect(() => {
-    if (!el || inView) return;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) return;
-        setInView(true);
-        io.disconnect();
-      },
-      { rootMargin: '0px 0px -12% 0px' },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [el, inView]);
-  const props = { ref: setEl, id, 'data-in': inView ? '' : undefined, className: `reveal scroll-mt-20 ${className}` };
-  return as === 'div' ? <div {...props}>{children}</div> : <section {...props}>{children}</section>;
-}
-
-function SectionTitle({ eyebrow, children }: { eyebrow: string; children: ReactNode }) {
-  return (
-    <div>
-      <p className="text-[0.8125rem] font-medium tracking-[0.06em] text-ink-3 uppercase">{eyebrow}</p>
-      <h2 className="h-display mt-3 max-w-[24ch] text-[clamp(1.875rem,3.6vw,2.875rem)] leading-[1.05] tracking-[-0.028em] text-balance">{children}</h2>
-    </div>
-  );
-}
-
-/** Pill link styled as a button: a route (to) or an anchor on this page (href). Colours follow the theme. */
-function CtaLink({ to, href, children, variant = 'primary', size = 'md' }: { to?: string; href?: string; children: ReactNode; variant?: 'primary' | 'secondary'; size?: 'sm' | 'md' }) {
-  const look = variant === 'primary' ? 'bg-ink text-canvas hover:bg-ink/90' : 'border border-line bg-canvas text-ink hover:border-ink/30 hover:bg-card';
-  const sizing = size === 'sm' ? 'h-9 px-4 text-[0.8125rem] gap-1.5' : 'h-12 px-6 text-[0.9375rem] gap-2';
-  const cls = `group inline-flex items-center rounded-full font-medium transition-[color,background-color,border-color,scale] duration-[160ms] active:scale-[0.97] ${look} ${sizing}`;
-  const inner = (
-    <>
-      {children}
-      <ArrowRight size={size === 'sm' ? '0.875rem' : '1rem'} aria-hidden="true" className="transition-transform duration-200 group-hover:translate-x-0.5" />
-    </>
-  );
-  return href ? <a href={href} className={cls}>{inner}</a> : <Link to={to ?? '/'} className={cls}>{inner}</Link>;
 }

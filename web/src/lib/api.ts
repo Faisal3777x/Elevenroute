@@ -2,12 +2,15 @@ import { queryClient } from './query';
 import { accessToken, supabase } from './supabase';
 
 /**
- * API base: VITE_API_URL if set. Otherwise the dev server (npm run dev) talks to the API on port 8000,
- * and the built dashboard is served by the API itself (npm run share), so it calls /api on the same origin.
+ * API base: VITE_API_URL if set. Otherwise the dev server talks to the API on the same host the page came from, on
+ * VITE_API_PORT (npm run dev:local: 8001) or 8000, so a phone opening the dev site over Wi-Fi reaches it too; and the
+ * built dashboard is served by the API itself (npm run share), so it calls /api on the same origin.
  */
 export const API_BASE =
-  (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ??
-  (import.meta.env.DEV ? `${location.protocol}//${location.hostname || 'localhost'}:8000` : `${location.origin}/api`);
+  (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ||
+  (import.meta.env.DEV
+    ? `${location.protocol}//${location.hostname || 'localhost'}:${(import.meta.env.VITE_API_PORT as string | undefined) || 8000}`
+    : `${location.origin}/api`);
 
 export class ApiError extends Error {}
 

@@ -238,7 +238,56 @@
 @keyframes hero-orb-scroll { to { translate: 0 -70px; opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .hero-orb-scroll { animation: none !important; } }
 
-/* Black theme, used by the landing page only: the same tokens, redefined for a dark canvas.
+/* A voice ripple: a soft band of the brand's three provider lights at the edge of a circle (the mask cuts out the
+   middle). It sits on an orb's outer ring and travels out by `scale`, fading as it goes, so it runs on the
+   compositor. Hidden unless animating. */
+.voice-ring {
+  opacity: 0;
+  background: conic-gradient(from 210deg, #3fc1b4, #7a5cff, #ff6a2b, #3fc1b4);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 0.5rem), #000 calc(100% - 0.1875rem), transparent);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 0.5rem), #000 calc(100% - 0.1875rem), transparent);
+}
+
+/* Landing hero: when the caller starts to speak, one ripple leaves the orb's outer ring, like the first movement of a
+   voice (Landing.tsx, useCaller). Use it with .voice-ring, which draws the ring. --ripple-to sets how far it goes. */
+@media (prefers-reduced-motion: no-preference) {
+  .caller-ripple { animation: caller-ripple 700ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+}
+@keyframes caller-ripple {
+  0% { scale: 1; opacity: 0; }
+  14% { opacity: 0.9; }
+  100% { scale: var(--ripple-to, 1.3); opacity: 0; }
+}
+
+/* About Us: the team diagram draws itself once it comes into view (`data-play`). One ripple leaves the logo while
+   the lines grow out to the three people at the same pace, and each point lands as its line arrives (on phones the
+   line grows down the list instead). Delays come from --d. Under reduced motion none of this is declared, so the
+   lines and points are simply there. */
+.team { --travel: cubic-bezier(0.33, 1, 0.68, 1); }
+@media (prefers-reduced-motion: no-preference) {
+  .team .team-line { stroke-dasharray: 1; }
+  .team:not([data-play]) .team-line { stroke-dashoffset: 1; }
+  .team:not([data-play]) .team-point, .team:not([data-play]) .team-spine { opacity: 0; }
+  .team[data-play] .team-ripple { animation: team-ripple 1100ms var(--travel) 350ms backwards; }
+  .team[data-play] .team-line { animation: team-draw 1100ms var(--travel) 350ms backwards; }
+  .team[data-play] .team-point { animation: team-point 520ms var(--ease-spring) var(--d, 1300ms) backwards; }
+  .team[data-play] .team-ping { animation: team-ping 900ms cubic-bezier(0.5, 1, 0.89, 1) var(--d, 1300ms) backwards; }
+  .team[data-play] .team-spine { transform-origin: top; animation: team-spine 420ms var(--travel) var(--d, 320ms) backwards; }
+  /* Opening a person's part sends one light down their line. */
+  .team-signal { stroke-dasharray: 0.14 1.2; animation: team-signal 700ms var(--travel) both; }
+}
+@keyframes team-ripple {
+  0% { scale: 1; opacity: 0; }
+  10% { opacity: 0.85; }
+  100% { scale: var(--ripple-to, 3); opacity: 0; }
+}
+@keyframes team-draw { from { stroke-dashoffset: 1; } }
+@keyframes team-point { from { scale: 0; opacity: 0; } }
+@keyframes team-ping { from { scale: 1; opacity: 0.55; } to { scale: 2.8; opacity: 0; } }
+@keyframes team-spine { from { scale: 1 0; } }
+@keyframes team-signal { from { stroke-dashoffset: 0.14; } to { stroke-dashoffset: -1; } }
+
+/* Black theme, used by the public pages (the landing page and About Us): the same tokens, redefined for a dark canvas.
    Everything inside .theme-dark that uses bg-canvas, text-ink, border-line… follows automatically. */
 .theme-dark {
   color-scheme: dark;
