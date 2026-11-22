@@ -22,8 +22,8 @@ const TEAM: Person[] = [
     did: 'I came up with the idea for ElevenRoute and built the website, including the dashboard where you can try the routing for yourself.',
   },
   {
-    id: 'ariana',
-    name: 'Ariana',
+    id: 'arianna',
+    name: 'Arianna',
     role: 'ElevenAgent concept designer',
     did: 'I came up with the idea for ElevenAgent and shaped how the agent responds as a conversation unfolds.',
   },
