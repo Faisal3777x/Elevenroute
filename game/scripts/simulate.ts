@@ -1,8 +1,8 @@
 // Plays Night Bite Diner headlessly for two in-game hours with a simple bot,
 // checking the bookkeeping after every tick. Run: npm run sim
-import { buy, canPlace, cook, espresso, hire, hydrate, move, newGame, sell, serialize, tick } from '../src/game/engine.ts';
+import { buy, canPlace, claimGoal, cook, espresso, expand, hire, hydrate, move, newGame, recruit, sell, serialize, tick } from '../src/game/engine.ts';
 import type { GameState } from '../src/game/engine.ts';
-import { DISHES, GRID_H, GRID_W, ITEMS, maxOf } from '../src/game/data.ts';
+import { DISHES, ITEMS, maxOf } from '../src/game/data.ts';
 import type { ItemKind } from '../src/game/data.ts';
 
 function check(s: GameState, t: number) {
@@ -26,8 +26,8 @@ function check(s: GameState, t: number) {
 /** Free tiles, best first: the bot leaves row 1 clear so the kitchen stays reachable. */
 function freeTiles(s: GameState): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
-  for (let y = GRID_H - 2; y >= 0; y--)
-    for (let x = 0; x < GRID_W; x++) if (y !== 1 && canPlace(s, x, y)) out.push({ x, y });
+  for (let y = s.size - 1; y >= 0; y--)
+    for (let x = 0; x < s.size; x++) if (y !== 1 && x !== 1 && canPlace(s, x, y)) out.push({ x, y });
   return out;
 }
 const placeAnywhere = (s: GameState, kind: ItemKind, t: number) => {
@@ -63,7 +63,10 @@ while (t < END) {
         if (!placeAnywhere(s, kind, t)) rejected++;
       }
     }
-    if (s.coins > 400) hire(s, t);
+    if (s.coins > 1200) hire(s, t);
+    if (s.coins > 3000) expand(s, t);
+    for (const g of s.guests) if (g.state === 'pondering') recruit(s, g.id, t);
+    claimGoal(s, t);
     if (s.staff.some((z) => z.energy < 20)) espresso(s, 'all');
   }
 
@@ -86,6 +89,9 @@ const summary = {
   served: s.served,
   rating: Number(s.rating.toFixed(2)),
   staff: s.staff.length,
+  recruited: s.recruited,
+  room: s.size,
+  goalsDone: s.goalIndex,
   items: Object.fromEntries(Object.keys(ITEMS).map((k) => [k, s.items.filter((i) => i.kind === k).length])),
   rejectedPlacements: rejected,
   angryGuests: angry,
@@ -93,4 +99,6 @@ const summary = {
 };
 console.log(JSON.stringify(summary, null, 2));
 if (s.served < 50) throw new Error('Too few guests were served: the loop is broken.');
+if (s.recruited < 1) throw new Error('No guest was ever recruited.');
+if (s.size < 9) throw new Error('The room never grew.');
 console.log('Simulation OK');

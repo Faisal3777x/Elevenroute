@@ -1,26 +1,56 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DISHES, ESPRESSO_COST, GRID_H, GRID_W, ITEMS, dishById, hireCost, maxOf, maxStaff, sellValue, xpForLevel } from '../game/data';
+import { DISHES, ESPRESSO_COST, ITEMS, PACES, ROOMS, dishById, hireCost, maxOf, maxStaff, sellValue, xpForLevel } from '../game/data';
 import type { ItemGroup, ItemKind } from '../game/data';
-import { buy, cook, countOf, discard, espresso, hire, isReady, itemAt, itemById, move, note, quickServe, sell, spook, tipBonus } from '../game/engine';
+import {
+  buy,
+  claimGoal,
+  cook,
+  countOf,
+  currentGoal,
+  discard,
+  espresso,
+  expand,
+  goalProgress,
+  hire,
+  isReady,
+  itemAt,
+  itemById,
+  move,
+  nextRoom,
+  note,
+  quickServe,
+  recruit,
+  sell,
+  spook,
+  tipBonus,
+} from '../game/engine';
 import type { GameState, Result, Staff } from '../game/engine';
 import { Board } from './Board';
 import type { Build } from './Board';
 import { Sheet } from './Sheet';
+import { play } from './sound';
 import { C, buzz, duration, native, num } from './theme';
 import { useGame } from './useGame';
 
 type Panel = null | { kind: 'stove'; id: string } | { kind: 'shop' } | { kind: 'staff' } | { kind: 'menu' };
+type ShopTab = ItemGroup | 'room';
 
 export function Game() {
   const { s, loaded, act, reset } = useGame();
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
   const [panel, setPanel] = useState<Panel>(null);
   const [build, setBuild] = useState<Build>(null);
-  const [shopTab, setShopTab] = useState<ItemGroup>('kitchen');
+  const [shopTab, setShopTab] = useState<ShopTab>('kitchen');
+
+  // Play whatever the last tick or action asked for.
+  useEffect(() => {
+    if (!s || s.sfx.length === 0) return;
+    if (!s.muted) for (const x of s.sfx) play(x);
+    s.sfx.length = 0;
+  });
 
   if (!loaded || !s) {
     return (
@@ -32,9 +62,6 @@ export function Game() {
   }
 
   const now = Date.now();
-  // Fit the board between the HUD and the bottom bar, never wider than the screen.
-  const avail = height - insets.top - insets.bottom - 200;
-  const size = Math.floor(Math.min(width - 24, 520, (avail * GRID_W) / GRID_H));
 
   const run = (fn: (s: GameState, now: number) => Result | void, good: 'tap' | 'ok' = 'ok') => {
     const r = act(fn);
@@ -43,6 +70,11 @@ export function Game() {
       if (r.msg) act((st, t) => note(st, r.msg!, t));
     } else buzz(good);
     return r ?? { ok: true };
+  };
+
+  const onGuest = (id: string) => {
+    if (build) return;
+    if (run((st, t) => recruit(st, id, t)).ok) buzz('win');
   };
 
   const onTile = (x: number, y: number) => {
@@ -57,7 +89,10 @@ export function Game() {
       }
       if (build.selected) {
         if (it?.id === build.selected) return setBuild({});
-        if (it) return setBuild({ selected: it.id }), buzz();
+        if (it) {
+          buzz();
+          return setBuild({ selected: it.id });
+        }
         const id = build.selected;
         const r = run((st) => move(st, id, x, y));
         if (r.ok) setBuild({});
@@ -69,6 +104,8 @@ export function Game() {
       }
       return;
     }
+    const thinker = s.guests.find((g) => g.state === 'pondering' && ((g.x === x && g.y === y) || (it && g.tableId === it.id)));
+    if (thinker) return onGuest(thinker.id);
     if (it?.kind === 'stove') {
       if (isReady(it, now)) run((st, t) => quickServe(st, it.id, t));
       else {
@@ -95,6 +132,8 @@ export function Game() {
   const sleepy = s.staff.filter((z) => z.energy < 30).length;
   const stove = panel?.kind === 'stove' ? itemById(s, panel.id) : undefined;
   const selected = build?.selected ? itemById(s, build.selected) : undefined;
+  const goal = currentGoal(s);
+  const room = nextRoom(s);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 6 }]}>
@@ -104,36 +143,33 @@ export function Game() {
           <Text style={styles.pillIcon}>🪙</Text>
           <Text style={[styles.pillText, { color: C.coin }]}>{num(s.coins)}</Text>
         </Pill>
-        <View style={styles.level}>
+        <Pressable onPress={() => setPanel({ kind: 'menu' })} style={({ pressed }) => [styles.level, pressed && styles.pressed]}>
           <View style={styles.levelBadge}>
             <Text style={styles.levelText}>{s.level}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.levelLabel}>Level {s.level}</Text>
+            <Text style={styles.levelLabel} numberOfLines={1}>
+              Night Bite Diner
+            </Text>
             <View style={styles.xpTrack}>
               <View style={[styles.xpFill, { transform: [{ scaleX: Math.max(0.02, xpP) }] }]} />
             </View>
           </View>
-        </View>
+        </Pressable>
         <Pill onPress={() => setPanel({ kind: 'menu' })}>
           <Text style={styles.pillIcon}>⭐</Text>
           <Text style={styles.pillText}>{s.rating.toFixed(1)}</Text>
         </Pill>
       </View>
 
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>🌙 Night Bite Diner</Text>
-        <Text style={styles.sub}>
-          {s.guests.length} {s.guests.length === 1 ? 'guest' : 'guests'} · tips +{Math.round(tipBonus(s) * 100)}%
-        </Text>
+      {goal ? <GoalBanner text={goal.text} have={Math.min(goalProgress(s, goal), goal.target)} need={goal.target} reward={goal.reward} onClaim={() => run((st, t) => claimGoal(st, t))} /> : null}
+
+      {/* ---------------- the diner */}
+      <View style={{ flex: 1, marginBottom: insets.bottom + 78 }}>
+        <Board s={s} now={now} build={build} onTile={onTile} onGuest={onGuest} />
       </View>
 
-      {/* ---------------- board */}
-      <View style={styles.center}>
-        <Board s={s} now={now} size={size} build={build} onTile={onTile} />
-      </View>
-
-      <Toast text={s.toast?.text ?? null} stamp={s.toast?.at ?? 0} top={insets.top + 64} />
+      <Toast text={s.toast?.text ?? null} stamp={s.toast?.at ?? 0} top={insets.top + 104} />
 
       {/* ---------------- bottom bar */}
       <View style={[styles.bottom, { paddingBottom: insets.bottom + 8 }]}>
@@ -144,7 +180,7 @@ export function Game() {
                 ? `Tap a glowing tile to place the ${ITEMS[build.placing].name.toLowerCase()} (${ITEMS[build.placing].cost} 🪙).`
                 : selected
                   ? `Tap a tile to move the ${ITEMS[selected.kind].name.toLowerCase()}, or sell it for ${sellValue(selected.kind)} 🪙.`
-                  : 'Tap anything to move or sell it.'}
+                  : 'Tap anything to move or sell it. Drag to look around.'}
             </Text>
             <View style={styles.row}>
               {selected ? (
@@ -213,48 +249,77 @@ export function Game() {
           options={[
             ['kitchen', 'Kitchen'],
             ['dining', 'Dining'],
-            ['decor', 'Spooky decor'],
+            ['decor', 'Decor'],
+            ['room', 'Room'],
           ]}
           onChange={setShopTab}
         />
-        {(Object.keys(ITEMS) as ItemKind[])
-          .filter((k) => ITEMS[k].group === shopTab)
-          .map((k) => {
-            const def = ITEMS[k];
-            const locked = def.level > s.level;
-            const max = maxOf(k, s.level);
-            const full = countOf(s, k) >= max;
-            const owned = Number.isFinite(max) ? `${countOf(s, k)}/${max} owned` : `${countOf(s, k)} owned`;
-            const extra = def.spook ? ` · +${def.spook} spook` : '';
-            return (
-              <Row
-                key={k}
-                icon={def.emoji}
-                title={def.name}
-                detail={locked ? `Unlocks at level ${def.level}` : full ? `${owned} · level up for more` : `${def.blurb}${extra} · ${owned}`}
-                dim={locked || full}
-                right={<Price amount={def.cost} short={s.coins < def.cost && !locked} locked={locked} />}
-                onPress={() => {
-                  if (locked || full || s.coins < def.cost) {
-                    buzz('no');
-                    act((st, t) => note(st, locked ? `${def.name} unlocks at level ${def.level}.` : full ? 'Level up to own more of these.' : `You need ${def.cost} coins.`, t));
-                    return;
+        {shopTab === 'room' ? (
+          <>
+            {ROOMS.map((r) => {
+              const owned = r.size <= s.size;
+              const isNext = room?.size === r.size;
+              const locked = r.level > s.level;
+              return (
+                <Row
+                  key={r.size}
+                  icon={owned ? '✅' : locked ? '🔒' : '🧱'}
+                  title={`${r.size} × ${r.size} diner`}
+                  detail={owned ? 'Yours' : locked ? `Unlocks at level ${r.level}` : isNext ? 'Knock through the walls for more space' : 'Expand step by step'}
+                  dim={!owned && (!isNext || locked)}
+                  right={owned ? undefined : <Price amount={r.cost} short={s.coins < r.cost && !locked} locked={locked} />}
+                  onPress={
+                    isNext
+                      ? () => {
+                          if (run((st, t) => expand(st, t)).ok) setPanel(null);
+                        }
+                      : undefined
                   }
-                  buzz();
-                  setPanel(null);
-                  setBuild({ placing: k });
-                }}
-              />
-            );
-          })}
-        {shopTab === 'decor' ? <Text style={styles.note}>Spooky decor makes guests more patient and adds {2}% to every tip per point of spook (up to +50%). You have {spook(s)} spook.</Text> : null}
+                />
+              );
+            })}
+            <Text style={styles.note}>Expanding keeps everything where it is and adds room along the front.</Text>
+          </>
+        ) : (
+          (Object.keys(ITEMS) as ItemKind[])
+            .filter((k) => ITEMS[k].group === shopTab)
+            .map((k) => {
+              const def = ITEMS[k];
+              const locked = def.level > s.level;
+              const max = maxOf(k, s.level);
+              const full = countOf(s, k) >= max;
+              const owned = Number.isFinite(max) ? `${countOf(s, k)}/${max} owned` : `${countOf(s, k)} owned`;
+              const extra = def.spook ? ` · +${def.spook} spook` : '';
+              return (
+                <Row
+                  key={k}
+                  icon={def.emoji}
+                  title={def.name}
+                  detail={locked ? `Unlocks at level ${def.level}` : full ? `${owned} · level up for more` : `${def.blurb}${extra} · ${owned}`}
+                  dim={locked || full}
+                  right={<Price amount={def.cost} short={s.coins < def.cost && !locked} locked={locked} />}
+                  onPress={() => {
+                    if (locked || full || s.coins < def.cost) {
+                      buzz('no');
+                      act((st, t) => note(st, locked ? `${def.name} unlocks at level ${def.level}.` : full ? 'Level up to own more of these.' : `You need ${def.cost} coins.`, t));
+                      return;
+                    }
+                    buzz();
+                    setPanel(null);
+                    setBuild({ placing: k });
+                  }}
+                />
+              );
+            })
+        )}
+        {shopTab === 'decor' ? <Text style={styles.note}>Spooky decor makes guests more patient, more likely to join your staff, and adds 2% to every tip per point of spook (up to +50%). You have {spook(s)} spook.</Text> : null}
       </Sheet>
 
       {/* ---------------- staff */}
       <Sheet
         open={panel?.kind === 'staff'}
         onClose={() => setPanel(null)}
-        title="Your zombies"
+        title={`Your zombies · ${s.staff.length}/${maxStaff(s.level)}`}
         footer={
           <Btn
             tone="go"
@@ -267,20 +332,22 @@ export function Game() {
           <Row
             key={z.id}
             icon={z.look}
-            title={z.name}
-            detail={doing(s, z)}
+            title={`${z.name} · ${PACES[z.pace ?? 1].name}`}
+            detail={doing(z)}
             meter={z.energy / 100}
             right={<Btn small tone={z.energy < 30 ? 'go' : 'ghost'} label={`☕ ${ESPRESSO_COST}`} onPress={() => run((st) => espresso(st, z.id))} />}
           />
         ))}
-        <Text style={styles.note}>Zombies slow to a crawl when they run out of energy. An espresso wakes one right up.</Text>
+        <Text style={styles.note}>Zombies slow to a crawl when they run out of energy; an espresso wakes one right up. Well-fed guests sometimes think about joining: tap one showing “Join?” to recruit them for free.</Text>
       </Sheet>
 
-      {/* ---------------- about / reset */}
+      {/* ---------------- about, sound, reset */}
       <Sheet open={panel?.kind === 'menu'} onClose={() => setPanel(null)} title="Your diner">
         <Row icon="⭐" title={`${s.rating.toFixed(1)} stars`} detail="Fed guests raise it. Guests who wait too long lower it." />
         <Row icon="🍽️" title={`${num(s.served)} guests served`} detail={`Level ${s.level} · ${num(s.xp)} / ${num(nextXp)} XP`} />
+        <Row icon="🧟" title={`${s.recruited} guests recruited`} detail={`${s.staff.length} zombies on staff`} />
         <Row icon="🦇" title={`${spook(s)} spook`} detail={`Tips +${Math.round(tipBonus(s) * 100)}%`} />
+        <Row icon={s.muted ? '🔇' : '🔊'} title={s.muted ? 'Sound off' : 'Sound on'} detail="Tap to switch" onPress={() => act((st) => void (st.muted = !st.muted))} />
         <ResetButton
           onReset={() => {
             reset();
@@ -296,7 +363,7 @@ export function Game() {
   );
 }
 
-function doing(s: GameState, z: Staff): string {
+function doing(z: Staff): string {
   const sleepy = z.energy <= 0 ? ' (half asleep)' : '';
   const t = z.task;
   if (!t || t.type === 'wander') return `Shambling about${sleepy}`;
@@ -307,6 +374,44 @@ function doing(s: GameState, z: Staff): string {
 }
 
 // ---------------------------------------------------------------- small pieces
+
+function GoalBanner({ text, have, need, reward, onClaim }: { text: string; have: number; need: number; reward: number; onClaim: () => void }) {
+  const done = have >= need;
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!done) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.06, duration: 420, easing: Easing.out(Easing.quad), useNativeDriver: native }),
+        Animated.timing(pulse, { toValue: 1, duration: 420, easing: Easing.in(Easing.quad), useNativeDriver: native }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [done, pulse]);
+  return (
+    <Pressable onPress={done ? onClaim : undefined} style={styles.goal}>
+      <Text style={{ fontSize: 18 }}>{done ? '🎁' : '🎯'}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.goalText} numberOfLines={1}>
+          {text}
+        </Text>
+        <View style={[styles.xpTrack, { marginTop: 4 }]}>
+          <View style={[styles.xpFill, { backgroundColor: C.zombie, transform: [{ scaleX: Math.max(0.02, have / need) }] }]} />
+        </View>
+      </View>
+      {done ? (
+        <Animated.View style={[styles.claim, { transform: [{ scale: pulse }] }]}>
+          <Text style={styles.claimText}>Claim {reward} 🪙</Text>
+        </Animated.View>
+      ) : (
+        <Text style={styles.goalCount}>
+          {have}/{need}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
 
 function Pill({ children, onPress }: { children: ReactNode; onPress?: () => void }) {
   return (
@@ -448,11 +553,12 @@ function Intro({ onStart }: { onStart: () => void }) {
       <Text style={styles.cardTitle}>Night Bite Diner</Text>
       <Text style={styles.cardBody}>You run the only diner in town that opens after midnight. Your staff are zombies: hard-working, a little slow, and powered by espresso.</Text>
       <View style={{ gap: 8, alignSelf: 'stretch' }}>
-        <Step n="1" text="Tap the stove 🍳 and pick something to cook." />
+        <Step n="1" text="Tap the stove and pick something to cook." />
         <Step n="2" text="Zombies carry food to the counter, serve guests and wipe tables." />
-        <Step n="3" text="Feed guests before they lose patience to earn coins and stars." />
-        <Step n="4" text="Buy tables, stoves and spooky decor. Hire more zombies." />
+        <Step n="3" text="Feed guests before they lose patience. A happy guest may ask to join: tap “Join?” to recruit them." />
+        <Step n="4" text="Buy furniture and spooky decor, expand the room, follow the goals." />
       </View>
+      <Text style={[styles.cardBody, { fontSize: 13 }]}>Drag to look around. Pinch or use + and − to zoom.</Text>
       <Btn tone="go" label="Open the diner" onPress={onStart} />
     </Overlay>
   );
@@ -476,7 +582,8 @@ function LevelUp({ level, onClose }: { level: number; onClose: () => void }) {
   const more: string[] = [];
   for (const k of ['stove', 'counter', 'table'] as ItemKind[]) if (maxOf(k, level) > maxOf(k, level - 1)) more.push(`another ${ITEMS[k].name.toLowerCase()}`);
   if (maxStaff(level) > maxStaff(level - 1)) more.push('another zombie');
-  const unlocks = [...dishes, ...decor, ...more.map((m) => `Room for ${m}`)];
+  const rooms = ROOMS.filter((r) => r.level === level).map((r) => `🧱 Expand to ${r.size} × ${r.size}`);
+  const unlocks = [...dishes, ...decor, ...rooms, ...more.map((m) => `Room for ${m}`)];
   return (
     <Overlay>
       <Text style={{ fontSize: 56, textAlign: 'center' }}>🎉</Text>
@@ -510,13 +617,15 @@ const styles = StyleSheet.create({
   level: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.panel, borderRadius: 999, padding: 4, paddingRight: 12, borderWidth: 1, borderColor: C.line },
   levelBadge: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' },
   levelText: { color: '#fff', fontWeight: '900', fontSize: 14 },
-  levelLabel: { color: C.muted, fontSize: 11, fontWeight: '700', marginBottom: 3 },
+  levelLabel: { color: C.text, fontSize: 12, fontWeight: '800', marginBottom: 3 },
   xpTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
   xpFill: { width: '100%', height: '100%', backgroundColor: C.purple, transformOrigin: 'left' },
 
-  titleRow: { alignItems: 'center', paddingVertical: 10 },
-  title: { color: C.text, fontSize: 20, fontWeight: '900', letterSpacing: 0.3 },
-  sub: { color: C.muted, fontSize: 13, marginTop: 2 },
+  goal: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, backgroundColor: C.panel, borderWidth: 1, borderColor: C.line },
+  goalText: { color: C.text, fontSize: 13, fontWeight: '700' },
+  goalCount: { color: C.muted, fontSize: 13, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  claim: { backgroundColor: C.zombie, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  claimText: { color: '#1a1226', fontWeight: '900', fontSize: 13 },
 
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 10, paddingHorizontal: 12, backgroundColor: C.panel, borderTopWidth: 1, borderColor: C.line },
   barBtn: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 14, gap: 2 },
