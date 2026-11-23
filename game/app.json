@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Night Bite Diner",
+    "slug": "night-bite-diner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#120d1f",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nightbite.diner"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
